@@ -1,0 +1,2630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rental Property Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<link rel="stylesheet" href="shared.css">
+<style>
+:root {
+  --paper: #f7f6f3;
+  --card: #ffffff;
+  --ink: #21252b;
+  --ink-soft: #5c6470;
+  --ink-faint: #9aa1ab;
+  --line: #e4e2dc;
+  --line-strong: #d2cfc7;
+  --accent: #1d6a5a;
+  --accent-soft: #e3efec;
+  --accent-strong: #145144;
+  --neg: #b4552d;
+  --neg-soft: #f6e8e1;
+  --warn: #a07c1f;
+  --warn-soft: #f5eeda;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(33,37,43,.05), 0 4px 16px rgba(33,37,43,.06);
+  --mono: 'Spline Sans Mono', ui-monospace, monospace;
+  --sans: 'Public Sans', -apple-system, sans-serif;
+  --display: 'Fraunces', Georgia, serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html { -webkit-text-size-adjust:100%; }
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.45;
+  background-image: radial-gradient(rgba(33,37,43,.028) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* ---------- layout ---------- */
+.wrap { max-width: 1280px; margin: 0 auto; padding: 24px 24px 80px; }
+header.top {
+  display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between;
+  gap:14px; margin-bottom: 16px;
+}
+.brand h1 { font-family: var(--display); font-weight: 500; font-size: 28px; letter-spacing:-.01em; }
+.brand h1 em { font-style: normal; color: var(--accent); }
+.brand p { color: var(--ink-soft); font-size: 13px; margin-top: 2px; }
+.deal-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.deal-bar input[type=text] {
+  font-family: var(--sans); font-size:14px; font-weight:600; color:var(--ink);
+  padding:10px 12px; border:1px solid var(--line-strong); border-radius:8px; background:var(--card);
+  width: 210px;
+}
+.deal-bar input[type=text]:focus { outline:2px solid var(--accent); outline-offset:-1px; border-color:transparent; }
+.btn {
+  font-family:var(--sans); font-size:13px; font-weight:600; cursor:pointer;
+  padding:10px 14px; border-radius:8px; border:1px solid var(--line-strong);
+  background:var(--card); color:var(--ink); transition: all .15s;
+}
+.btn:hover { border-color: var(--ink-faint); }
+.btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+.btn.primary:hover { background:var(--accent-strong); }
+.btn.ghost { background:transparent; }
+
+/* ---------- tabs ---------- */
+.tabs {
+  display:flex; gap:4px; border-bottom:1px solid var(--line-strong); margin-bottom:22px;
+  overflow-x:auto; -webkit-overflow-scrolling:touch;
+}
+.tab {
+  font-family:var(--sans); font-size:14px; font-weight:600; color:var(--ink-soft);
+  padding:11px 18px; border:none; background:none; cursor:pointer; white-space:nowrap;
+  border-bottom:2.5px solid transparent; margin-bottom:-1px; transition:all .15s;
+}
+.tab:hover { color:var(--ink); }
+.tab.on { color:var(--accent-strong); border-bottom-color:var(--accent); }
+.tab .badge {
+  font-family:var(--mono); font-size:10.5px; font-weight:600; margin-left:6px;
+  background:var(--accent-soft); color:var(--accent-strong); border-radius:99px; padding:2px 7px;
+}
+.pane { display:none; }
+.pane.on { display:block; }
+
+.grid { display:grid; grid-template-columns: 400px 1fr; gap: 22px; align-items:start; }
+.grid > div { min-width: 0; }
+@media (max-width: 980px){ .grid { grid-template-columns: 1fr; } }
+
+/* ---------- cards ---------- */
+.card {
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow: var(--shadow); overflow:hidden;
+}
+.card + .card { margin-top: 18px; }
+.card h2 {
+  font-family: var(--display); font-weight:600; font-size:15px; letter-spacing:.01em;
+  padding: 13px 18px 11px; border-bottom:1px solid var(--line);
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  background: linear-gradient(#fff, #fbfaf8);
+}
+.card h2 .tag { font-family:var(--mono); font-size:10.5px; font-weight:500; color:var(--ink-faint); letter-spacing:.06em; text-transform:uppercase; text-align:right; }
+.card .body { padding: 14px 18px 18px; }
+
+/* ---------- input rows ---------- */
+.row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 0; flex-wrap:wrap; }
+.row label { font-size:13px; color:var(--ink-soft); font-weight:500; flex:1; min-width:110px; }
+.row .sub { display:block; font-size:11px; color:var(--ink-faint); font-weight:400; }
+.num {
+  font-family: var(--mono); font-size:14px; font-weight:500; text-align:right;
+  width: 118px; padding:8px 10px; border:1px solid var(--line-strong); border-radius:7px;
+  background:#fdfcfa; color:var(--ink);
+}
+.num:focus { outline:2px solid var(--accent); outline-offset:-1px; border-color:transparent; background:#fff; }
+.num.small { width: 92px; }
+.num[readonly] { background:var(--accent-soft); border-color:#bcd8d0; color:var(--accent-strong); cursor:default; }
+
+/* unit toggle */
+.unit-toggle { display:flex; border:1px solid var(--line-strong); border-radius:6px; overflow:hidden; flex-shrink:0; }
+.unit-toggle button {
+  font-family:var(--mono); font-size:9.5px; font-weight:600; padding:4px 5px; cursor:pointer;
+  border:none; background:#fdfcfa; color:var(--ink-faint); transition: all .12s;
+}
+.unit-toggle button.on { background:var(--ink); color:#fff; }
+
+/* on/off switch */
+.switch { position:relative; display:inline-block; width:28px; height:16px; flex-shrink:0; }
+.switch input { opacity:0; width:0; height:0; }
+.switch .sl {
+  position:absolute; inset:0; background:var(--line-strong); border-radius:99px; cursor:pointer; transition:.18s;
+}
+.switch .sl::before {
+  content:''; position:absolute; width:12px; height:12px; left:2px; top:2px;
+  background:#fff; border-radius:50%; transition:.18s; box-shadow:0 1px 3px rgba(0,0,0,.25);
+}
+.switch input:checked + .sl { background:var(--accent); }
+.switch input:checked + .sl::before { transform:translateX(12px); }
+.row label.switch { flex:0 0 28px; min-width:28px; }
+
+/* dense cards — tighter sliders & rows */
+.dense .slider-row { padding:3px 0 0; }
+.dense .slider-head { margin-bottom:0; }
+.dense .slider-head label { font-size:12.5px; }
+.dense .slider-head output { font-size:12.5px; }
+.dense input[type=range] { height:23px; }
+.dense input[type=range]::-webkit-slider-thumb { width:15px; height:15px; margin-top:-5px; }
+.dense input[type=range]::-moz-range-thumb { width:11px; height:11px; }
+.dense .row { padding:5px 0; }
+
+.fin-sub { display:none; border:1px solid var(--line); border-radius:8px; background:#fdfcfa; padding:4px 12px 8px; margin:2px 0 8px; }
+.fin-sub.on { display:block; }
+.fin-sub .row { padding:5px 0; }
+.fin-sub .row label { font-size:12.5px; }
+.fin-sub select {
+  font-family:var(--sans); font-size:12.5px; padding:7px 9px; border:1px solid var(--line-strong);
+  border-radius:7px; background:#fff; color:var(--ink);
+}
+
+.fin-summary { border-top:1px dashed var(--line); margin-top:8px; padding-top:8px; }
+.fin-summary .row { padding:3.5px 0; }
+.fin-summary .row label { font-size:12.5px; }
+.fin-summary .val { font-family:var(--mono); font-size:12.5px; font-weight:500; }
+.fin-summary .row.total { border-top:1px solid var(--line-strong); margin-top:4px; padding-top:7px; }
+.fin-summary .row.total label, .fin-summary .row.total .val { font-weight:700; font-size:13px; color:var(--ink); }
+.fin-summary .row.debt-total { margin-top:6px; }
+.fin-summary .row.debt-total label { font-weight:700; font-size:14.5px; color:var(--ink); }
+.fin-summary .row.debt-total .val { font-family:var(--mono); font-weight:700; font-size:16.5px; color:var(--accent-strong); }
+.fin-warn {
+  display:none; background:var(--neg-soft); border:1px solid #e5c3b1; color:var(--neg);
+  font-size:12px; font-weight:600; border-radius:8px; padding:8px 11px; margin-top:8px;
+}
+.fin-warn.show { display:block; }
+.fin-ok { color: var(--accent-strong); }
+
+/* ---------- sliders ---------- */
+.slider-row { padding: 9px 0 3px; }
+.slider-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px; gap:8px; }
+.slider-head label { font-size:13px; color:var(--ink-soft); font-weight:500; }
+.slider-head output { font-family:var(--mono); font-size:13px; font-weight:600; color:var(--ink); text-align:right; }
+input[type=range] {
+  width:100%; height:30px; -webkit-appearance:none; appearance:none; background:transparent; cursor:pointer;
+  touch-action: pan-y;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height:5px; border-radius:3px;
+  background: linear-gradient(to right, var(--accent) var(--fill,50%), var(--line) var(--fill,50%));
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:20px; height:20px; border-radius:50%;
+  background:#fff; border:2.5px solid var(--accent); margin-top:-7.5px;
+  box-shadow: 0 1px 4px rgba(33,37,43,.25);
+}
+input[type=range]::-moz-range-track { height:5px; border-radius:3px; background:var(--line); }
+input[type=range]::-moz-range-progress { height:5px; border-radius:3px; background:var(--accent); }
+input[type=range]::-moz-range-thumb {
+  width:15px; height:15px; border-radius:50%; background:#fff; border:2.5px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(33,37,43,.25);
+}
+
+/* ---------- collapsibles ---------- */
+details.collapse { border:1px solid var(--line); border-radius:8px; margin:8px 0; background:#fdfcfa; }
+details.collapse summary {
+  list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between;
+  gap:10px; padding:10px 12px; font-size:13px; font-weight:600; color:var(--ink-soft);
+  -webkit-tap-highlight-color: transparent;
+}
+details.collapse summary::-webkit-details-marker { display:none; }
+details.collapse summary .chev { transition:transform .18s; color:var(--ink-faint); font-size:11px; display:inline-block; }
+details.collapse[open] summary .chev { transform:rotate(90deg); }
+details.collapse summary .sum-val { font-family:var(--mono); font-weight:600; color:var(--ink); white-space:nowrap; }
+details.collapse .inner { padding: 2px 12px 10px; border-top:1px dashed var(--line); }
+details.collapse .inner .row { padding:5px 0; }
+details.collapse .inner .row label { font-size:12.5px; }
+
+/* ---------- verdict banner ---------- */
+.verdict {
+  border-radius: var(--radius); padding: 15px 18px; margin-bottom: 18px;
+  display:flex; align-items:center; gap:14px; border:1px solid;
+  box-shadow: var(--shadow);
+}
+.verdict.good { background: var(--accent-soft); border-color:#bcd8d0; }
+.verdict.ok   { background: var(--warn-soft); border-color:#e2d4a8; }
+.verdict.bad  { background: var(--neg-soft); border-color:#e5c3b1; }
+.verdict .dot { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
+.verdict.good .dot { background:var(--accent); box-shadow:0 0 0 4px rgba(29,106,90,.18); }
+.verdict.ok   .dot { background:var(--warn); box-shadow:0 0 0 4px rgba(160,124,31,.18); }
+.verdict.bad  .dot { background:var(--neg); box-shadow:0 0 0 4px rgba(180,85,45,.18); }
+.verdict .v-title { font-family:var(--display); font-size:16.5px; font-weight:600; }
+.verdict .v-sub { font-size:12.5px; color:var(--ink-soft); margin-top:1px; }
+
+/* ---------- metric tiles ---------- */
+.tiles { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:16px; }
+@media (max-width: 1150px){ .tiles { grid-template-columns:repeat(2, 1fr);} }
+.tile {
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+  padding: 12px 14px 11px; box-shadow:var(--shadow); position:relative; overflow:hidden;
+}
+.tile::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:var(--line); }
+.tile.hero::before { background: var(--accent); }
+.tile.negative::before { background: var(--neg); }
+.tile .t-label { font-size:10.5px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-faint); }
+.tile .t-value { font-family:var(--mono); font-size:22px; font-weight:600; margin-top:3px; letter-spacing:-.02em; }
+.tile .t-value.pos { color: var(--accent-strong); }
+.tile .t-value.neg { color: var(--neg); }
+.tile .t-note { font-size:10.5px; color:var(--ink-faint); margin-top:2px; }
+
+/* rule checks */
+.checks { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+.check {
+  display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600;
+  background:var(--card); border:1px solid var(--line); border-radius:99px; padding:7px 14px 7px 10px;
+  box-shadow:var(--shadow);
+}
+.check .mark { font-family:var(--mono); font-size:11px; width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; flex-shrink:0; }
+.check.pass .mark { background:var(--accent); }
+.check.fail .mark { background:var(--neg); }
+.check span.val { font-family:var(--mono); font-weight:500; color:var(--ink-soft); }
+
+/* ---------- monthly breakdown ---------- */
+.flow-table { width:100%; border-collapse:collapse; }
+.flow-table td { padding: 5.5px 0; font-size:13px; }
+.flow-table td:last-child { text-align:right; font-family:var(--mono); font-size:13px; font-weight:500; white-space:nowrap; }
+.flow-table tr.head td { color:var(--ink-faint); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; padding-top:12px; }
+.flow-table tr.total td { border-top:1px solid var(--line-strong); font-weight:700; padding-top:8px; }
+.flow-table tr.total td:last-child { font-weight:600; }
+.flow-table td.indent { padding-left: 14px; color:var(--ink-soft); }
+.amt-neg { color: var(--neg); }
+.amt-pos { color: var(--accent-strong); }
+
+/* ---------- pro-forma ---------- */
+.pf-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+table.pf { width:100%; border-collapse:collapse; min-width: 620px; }
+table.pf th, table.pf td { padding: 7px 10px; font-size:12.5px; text-align:right; white-space:nowrap; }
+table.pf th:first-child, table.pf td:first-child { text-align:left; position:sticky; left:0; background:var(--card); }
+table.pf thead th {
+  font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.04em;
+  color:var(--ink-faint); border-bottom:1.5px solid var(--line-strong); text-transform:uppercase;
+}
+table.pf tbody td { font-family:var(--mono); font-weight:500; border-bottom:1px solid var(--line); }
+table.pf tbody td:first-child { font-family:var(--sans); font-weight:500; color:var(--ink-soft); }
+table.pf tr.section td { font-family:var(--sans); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faint); border-bottom:none; padding-top:14px; }
+table.pf tr.strong td { font-weight:700; background:#fbfaf7; }
+table.pf tr.strong td:first-child { background:#fbfaf7; }
+
+/* ---------- exit / sale ---------- */
+.exit-grid { display:grid; grid-template-columns: repeat(3,1fr); gap:12px; }
+@media (max-width: 700px){ .exit-grid { grid-template-columns:1fr; } }
+.exit-box { border:1px solid var(--line); border-radius:8px; padding:12px 14px; background:#fdfcfa; }
+.exit-box .e-label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faint); }
+.exit-box .e-value { font-family:var(--mono); font-size:19px; font-weight:600; margin-top:2px; }
+
+/* ---------- scope of work ---------- */
+.sow-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.sow-toolbar .left { display:flex; gap:8px; flex-wrap:wrap; }
+.sow-total-chip {
+  display:flex; align-items:baseline; gap:8px; background:var(--card); border:1px solid var(--line);
+  border-radius:10px; padding:10px 16px; box-shadow:var(--shadow);
+}
+.sow-total-chip .lbl { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faint); }
+.sow-total-chip .val { font-family:var(--mono); font-size:20px; font-weight:600; color:var(--accent-strong); }
+.sow-section { margin:10px 0; }
+.sow-items { display:flex; flex-direction:column; gap:8px; padding-top:8px; }
+.sow-item {
+  display:grid; grid-template-columns: 1fr 120px 34px; gap:8px; align-items:center;
+}
+@media (max-width: 560px){
+  .sow-item { grid-template-columns: 1fr 96px 30px; }
+}
+.sow-item input[type=text] {
+  font-family:var(--sans); font-size:13px; padding:8px 9px; border:1px solid var(--line-strong);
+  border-radius:7px; background:#fff; color:var(--ink); width:100%; min-width:0;
+}
+.sow-item input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+.sow-item .num { width:100%; }
+.sow-item .del {
+  border:none; background:none; color:var(--ink-faint); font-size:15px; cursor:pointer;
+  width:30px; height:34px; border-radius:7px;
+}
+.sow-item .del:hover { background:var(--neg-soft); color:var(--neg); }
+.sow-add-btn { margin-top:8px; font-size:12px; padding:7px 12px; }
+.sow-cat-summary table { width:100%; border-collapse:collapse; }
+.sow-cat-summary td { padding:6px 0; font-size:13px; border-bottom:1px solid var(--line); }
+.sow-cat-summary td:last-child { text-align:right; font-family:var(--mono); font-weight:500; }
+.sow-cat-summary tr:last-child td { border-bottom:none; font-weight:700; }
+
+/* ---------- neighborhood ---------- */
+#hood_notes {
+  width:100%; font-family:var(--sans); font-size:13px; line-height:1.5; padding:10px 12px;
+  border:1px solid var(--line-strong); border-radius:8px; background:#fdfcfa; color:var(--ink);
+  resize:vertical; margin-top:2px;
+}
+#hood_notes:focus { outline:2px solid var(--accent); outline-offset:-1px; background:#fff; }
+.hood-select {
+  font-family:var(--sans); font-size:12.5px; font-weight:600; padding:8px 10px;
+  border:1px solid var(--line-strong); border-radius:7px; background:#fff; color:var(--ink);
+}
+
+/* ---------- capex tracker ---------- */
+.cx-cat {
+  font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--ink-faint); margin:12px 0 5px;
+}
+.cx-cat:first-child { margin-top:2px; }
+.capex-item {
+  border:1px solid var(--line); border-radius:8px; padding:7px 9px 8px;
+  margin-bottom:6px; background:#fdfcfa;
+}
+.cx-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.cx-sel {
+  font-family:var(--sans); font-size:12px; font-weight:600; padding:6px 7px;
+  border:1px solid var(--line-strong); border-radius:7px; background:#fff; color:var(--ink);
+}
+.cx-type { flex:1; min-width:150px; }
+.cx-name-input {
+  flex:1; min-width:130px; font-family:var(--sans); font-size:12px; font-weight:600; padding:6px 8px;
+  border:1px solid var(--line-strong); border-radius:7px; background:#fff; color:var(--ink);
+}
+.cx-name-input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+.cx-cost { font-family:var(--mono); font-size:11px; color:var(--ink-soft); white-space:nowrap; }
+.cx-age { font-family:var(--mono); font-size:11px; color:var(--ink-faint); white-space:nowrap; }
+.cx-age.warn { color:var(--neg); font-weight:700; }
+.cx-notes {
+  width:100%; font-family:var(--sans); font-size:12px; padding:6px 9px; margin-top:6px;
+  border:1px solid var(--line-strong); border-radius:7px; background:#fff; color:var(--ink);
+}
+.cx-notes:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+.cx-del {
+  border:none; background:none; color:var(--ink-faint); font-size:12px; cursor:pointer;
+  width:24px; height:24px; border-radius:50%; flex-shrink:0;
+}
+.cx-del:hover { background:var(--neg-soft); color:var(--neg); }
+.cx-info {
+  position:relative; display:inline-flex; width:17px; height:17px; align-items:center; justify-content:center;
+  border-radius:50%; background:var(--line); color:var(--ink-soft); font-size:10px; font-weight:700;
+  cursor:help; flex-shrink:0; font-family:var(--mono);
+}
+.cx-info .tip {
+  display:none; position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%);
+  width:240px; background:var(--ink); color:#fff; font-size:11.5px; font-weight:400; line-height:1.45;
+  padding:9px 11px; border-radius:8px; z-index:60; box-shadow:0 8px 24px rgba(0,0,0,.25);
+}
+.cx-info .tip b { color:#fff; }
+.cx-info:hover .tip, .cx-info:focus .tip { display:block; }
+
+/* ---------- comps ---------- */
+.comp-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px; }
+.comp-head, .comp-item {
+  display:grid; grid-template-columns: minmax(170px,1fr) 104px 78px 48px 48px 70px 30px;
+  gap:8px; align-items:center; min-width:580px;
+}
+.comp-head span {
+  font-family:var(--mono); font-size:10.5px; font-weight:600; letter-spacing:.05em;
+  text-transform:uppercase; color:var(--ink-faint); padding-bottom:4px;
+}
+.comp-item { padding:4px 0; }
+.comp-item input[type=text] {
+  font-family:var(--sans); font-size:13px; padding:8px 9px; border:1px solid var(--line-strong);
+  border-radius:7px; background:#fff; color:var(--ink); width:100%; min-width:0;
+}
+.comp-item input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+.comp-item .num { width:100%; }
+.comp-item .psf { font-family:var(--mono); font-size:12.5px; font-weight:500; color:var(--ink-soft); text-align:right; white-space:nowrap; }
+.comp-item .del {
+  border:none; background:none; color:var(--ink-faint); font-size:14px; cursor:pointer;
+  width:28px; height:32px; border-radius:7px;
+}
+.comp-item .del:hover { background:var(--neg-soft); color:var(--neg); }
+
+/* ---------- saved deals ---------- */
+.saved-list { display:flex; flex-direction:column; gap:8px; }
+.saved-item {
+  display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
+  border:1px solid var(--line); border-radius:8px; padding:9px 12px; background:#fdfcfa;
+}
+.saved-item .s-name { font-weight:600; font-size:13px; }
+.saved-item .s-meta { font-family:var(--mono); font-size:11px; color:var(--ink-soft); margin-top:1px; }
+.saved-item .s-actions { display:flex; gap:6px; }
+.saved-item button { font-size:11.5px; padding:6px 10px; }
+.empty-note { color:var(--ink-faint); font-size:12.5px; font-style:italic; }
+
+.footnote { margin-top:22px; font-size:11.5px; color:var(--ink-faint); line-height:1.5; }
+.toast {
+  position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(80px);
+  background:var(--ink); color:#fff; font-size:13px; font-weight:600; padding:10px 20px;
+  border-radius:99px; transition: transform .25s ease; z-index:50; box-shadow:0 6px 24px rgba(0,0,0,.25);
+  max-width:90vw; text-align:center;
+}
+.toast.show { transform:translateX(-50%) translateY(0); }
+
+/* ---------- property header ---------- */
+.prop-card { margin-bottom:18px; }
+.prop-addr-row { display:flex; gap:8px; flex-wrap:wrap; }
+.prop-addr-row input {
+  flex:1; min-width:200px; font-family:var(--sans); font-size:14px; font-weight:600;
+  padding:10px 12px; border:1px solid var(--line-strong); border-radius:8px; background:#fdfcfa; color:var(--ink);
+}
+.prop-addr-row input:focus { outline:2px solid var(--accent); outline-offset:-1px; background:#fff; }
+.prop-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.p-chip {
+  display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600;
+  background:#fdfcfa; border:1px solid var(--line); border-radius:99px; padding:5px 12px;
+  color:var(--ink-soft); text-decoration:none; white-space:nowrap;
+}
+.p-chip b { font-family:var(--mono); font-weight:600; color:var(--ink); }
+a.p-chip { cursor:pointer; transition:border-color .15s; }
+a.p-chip:hover { border-color:var(--accent); color:var(--accent-strong); }
+a.p-chip.link { background:var(--accent-soft); border-color:#bcd8d0; color:var(--accent-strong); }
+.prop-facts { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px 12px; padding:4px 0 2px; }
+.prop-facts .pf-item label { display:block; font-size:11px; font-weight:600; color:var(--ink-faint); margin-bottom:3px; }
+.prop-facts .pf-item input { width:100%; }
+.url-row { display:grid; grid-template-columns: 110px 1fr 30px; gap:8px; align-items:center; padding:4px 0; }
+.url-row input {
+  font-family:var(--sans); font-size:12.5px; padding:7px 9px; border:1px solid var(--line-strong);
+  border-radius:7px; background:#fff; color:var(--ink); width:100%; min-width:0;
+}
+.url-row input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+.url-row .del {
+  border:none; background:none; color:var(--ink-faint); font-size:14px; cursor:pointer;
+  width:28px; height:30px; border-radius:7px;
+}
+.url-row .del:hover { background:var(--neg-soft); color:var(--neg); }
+.rc-note { font-size:11px; color:var(--ink-faint); line-height:1.45; margin-top:4px; }
+
+/* ---------- deal header: editable name + switcher ---------- */
+.deal-head { margin:0 0 14px; }
+.deal-title-wrap { position:relative; display:flex; align-items:center; gap:2px; }
+.caret-btn {
+  border:none; background:none; font-size:15px; color:var(--ink-faint); cursor:pointer;
+  padding:4px 9px; border-radius:6px; line-height:1;
+}
+.caret-btn:hover { background:var(--card); color:var(--ink); }
+.deal-menu {
+  display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:40;
+  background:var(--card); border:1px solid var(--line-strong); border-radius:10px;
+  box-shadow:0 12px 40px rgba(33,37,43,.18); min-width:300px; max-width:92vw;
+  padding:6px; max-height:60vh; overflow:auto;
+}
+.deal-menu.open { display:block; }
+.dm-item {
+  display:flex; justify-content:space-between; align-items:center; gap:10px;
+  padding:9px 10px; border-radius:7px; cursor:pointer;
+}
+.dm-item:hover { background:var(--paper); }
+.dm-item .dm-n { font-weight:600; font-size:13px; }
+.dm-item .dm-m { font-family:var(--mono); font-size:11px; color:var(--ink-soft); margin-top:1px; }
+.dm-item.new { color:var(--accent-strong); font-weight:700; font-size:13px; border-bottom:1px solid var(--line); border-radius:7px 7px 0 0; margin-bottom:4px; }
+.dm-del { border:none; background:none; color:var(--ink-faint); cursor:pointer; width:24px; height:24px; border-radius:50%; flex-shrink:0; font-size:12px; }
+.dm-del:hover { background:var(--neg-soft); color:var(--neg); }
+.dm-empty { padding:10px; font-size:12px; color:var(--ink-faint); font-style:italic; }
+.deal-name {
+  font-family:var(--display); font-size:21px; font-weight:600; color:var(--ink);
+  flex:0 1 auto; min-width:120px; max-width:100%; outline:none; padding:3px 8px; margin-left:-8px;
+  border-radius:7px; border:1px dashed transparent; cursor:text; transition:border-color .15s, background .15s;
+}
+.deal-name:hover { border-color:var(--line-strong); }
+.deal-name:focus { border-color:transparent; background:#fff; box-shadow:0 0 0 2px var(--accent); }
+.deal-name:empty::before { content:attr(data-placeholder); color:var(--ink-faint); font-weight:400; font-size:17px; }
+
+/* ---------- account / sign-in ---------- */
+.account { display:flex; align-items:center; gap:8px; }
+.account img { width:26px; height:26px; border-radius:50%; border:1px solid var(--line-strong); }
+.account .an { font-size:12.5px; font-weight:600; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.account .btn { padding:6px 10px; font-size:11.5px; }
+
+/* ---------- compact assumptions ---------- */
+.assume .body {
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));
+  gap:2px 22px; padding:8px 18px 12px;
+}
+.assume .slider-row { padding:4px 0 0; }
+.assume .slider-head { margin-bottom:0; }
+.assume .slider-head label { font-size:12px; }
+.assume .slider-head output { font-size:12px; }
+.assume input[type=range] { height:24px; }
+.assume input[type=range]::-webkit-slider-thumb { width:16px; height:16px; margin-top:-5.5px; }
+.assume input[type=range]::-moz-range-thumb { width:12px; height:12px; }
+
+/* ---------- combined cash-flow statement ---------- */
+.sec-label {
+  font-size:11px; font-weight:700 !important; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--ink-faint) !important; padding-top:6px;
+}
+.row.comp .comp-val { font-family:var(--mono); font-size:13.5px; font-weight:600; white-space:nowrap; padding-right:2px; }
+.row.comp.subtotal { border-top:1px solid var(--line-strong); margin-top:2px; }
+.row.comp.subtotal label { font-weight:700; color:var(--ink); }
+.exp-hint { display:block; font-size:11px; color:var(--ink-faint); font-weight:400; }
+
+/* ---------- inline utilities ---------- */
+.util-head { cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.util-head label { cursor:pointer; }
+.util-head .chev { display:inline-block; transition:transform .18s; color:var(--ink-faint); font-size:10px; margin-right:5px; }
+.util-head.open .chev { transform:rotate(90deg); }
+.util-head .util-total { font-family:var(--mono); font-size:14px; font-weight:500; padding-right:2px; }
+.util-body { display:none; border-left:2px solid var(--line); margin:0 0 4px 5px; padding-left:13px; }
+.util-body.open { display:block; }
+.util-body .row { padding:4px 0; }
+.util-body .row label { font-size:12.5px; }
+
+/* ---------- saved deal chips ---------- */
+.saved-strip { display:none; align-items:center; gap:8px; overflow-x:auto; margin:0 0 14px; padding-bottom:3px; -webkit-overflow-scrolling:touch; }
+.saved-strip.has { display:flex; }
+.saved-strip .strip-label {
+  font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--ink-faint); flex-shrink:0;
+}
+.deal-chip {
+  display:flex; align-items:center; gap:9px; background:var(--card); border:1px solid var(--line);
+  border-radius:99px; padding:6px 6px 6px 14px; cursor:pointer; box-shadow:var(--shadow);
+  white-space:nowrap; flex-shrink:0; transition:border-color .15s;
+}
+.deal-chip:hover { border-color:var(--accent); }
+.deal-chip .n { font-weight:600; font-size:12.5px; }
+.deal-chip .m { font-family:var(--mono); font-size:11px; color:var(--ink-soft); }
+.deal-chip .x {
+  border:none; background:none; color:var(--ink-faint); cursor:pointer; font-size:12px;
+  width:22px; height:22px; border-radius:50%; flex-shrink:0;
+}
+.deal-chip .x:hover { background:var(--neg-soft); color:var(--neg); }
+
+/* ---------- voice ---------- */
+.voice-btn.listening { background:var(--neg); border-color:var(--neg); color:#fff; animation:vpulse 1.2s infinite; }
+@keyframes vpulse {
+  0% { box-shadow:0 0 0 0 rgba(180,85,45,.45); }
+  70% { box-shadow:0 0 0 10px rgba(180,85,45,0); }
+  100% { box-shadow:0 0 0 0 rgba(180,85,45,0); }
+}
+.voice-modal {
+  position:fixed; inset:0; background:rgba(33,37,43,.45); display:none;
+  align-items:center; justify-content:center; z-index:60; padding:16px;
+}
+.voice-modal.show { display:flex; }
+.voice-card {
+  background:var(--card); border-radius:14px; max-width:540px; width:100%;
+  box-shadow:0 20px 60px rgba(0,0,0,.3); padding:20px 22px; max-height:82vh; overflow:auto;
+}
+.voice-card h3 { font-family:var(--display); font-size:18px; font-weight:600; display:flex; align-items:center; gap:10px; }
+.voice-card h3 .rec-dot { width:10px; height:10px; border-radius:50%; background:var(--neg); animation:vpulse 1.2s infinite; }
+.voice-hint { font-size:12.5px; color:var(--ink-soft); margin:8px 0 12px; line-height:1.5; }
+.voice-transcript {
+  font-size:13.5px; background:#fdfcfa; border:1px dashed var(--line-strong); border-radius:8px;
+  padding:10px 12px; min-height:56px; color:var(--ink); margin-bottom:12px; white-space:pre-wrap;
+}
+.voice-transcript .interim { color:var(--ink-faint); }
+.voice-results { margin-bottom:12px; }
+.voice-results .vr {
+  display:flex; justify-content:space-between; gap:10px; font-size:13px; padding:6px 0;
+  border-bottom:1px solid var(--line);
+}
+.voice-results .vr:last-child { border-bottom:none; }
+.voice-results .vr .f { font-weight:600; color:var(--ink-soft); }
+.voice-results .vr .v { font-family:var(--mono); font-weight:600; color:var(--accent-strong); }
+.voice-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:6px; }
+
+/* ---------- mobile ---------- */
+@media (max-width: 640px){
+  body { font-size: 13.5px; }
+  .wrap { padding: 16px 12px 64px; }
+  .brand h1 { font-size: 23px; }
+  header.top { align-items:flex-start; flex-direction:column; }
+  .deal-bar { width:100%; }
+  .deal-bar input[type=text] { flex:1; width:auto; min-width:0; }
+  .card .body { padding: 12px 13px 15px; }
+  .card h2 { padding: 12px 13px 10px; }
+  .tiles { gap:9px; }
+  .tile .t-value { font-size:19px; }
+  .num { width:106px; }
+  .num.small { width:84px; }
+  .tab { padding:10px 13px; font-size:13.5px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div id="shellHeader"></div>
+
+<div class="deal-head">
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+    <div class="deal-title-wrap">
+      <span class="deal-name" id="dealName" contenteditable="true" spellcheck="false" data-placeholder="Untitled deal — tap to name"></span>
+      <button class="caret-btn" id="dealSwitch" title="Switch deal">▾</button>
+      <div class="deal-menu" id="dealMenu"></div>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn voice-btn" id="voiceBtn" title="Fill inputs by speaking">🎤 Voice fill</button>
+      <button class="btn" id="pdfBtn" title="Open a print-ready deal report — choose “Save as PDF” in the print dialog">⬇ PDF</button>
+      <button class="btn" id="emailBtn" title="Send a text snapshot via your email app">✉ Email</button>
+      <button class="btn primary" id="saveBtn">Save deal</button>
+      <button class="btn ghost" id="resetBtn">Reset</button>
+    </div>
+  </div>
+  <div class="prop-chips" id="propChipsMini" style="margin-top:8px;"></div>
+  <details class="collapse" id="propDetails" style="margin-top:8px; background:var(--card);">
+    <summary><span><span class="chev">▶</span>&nbsp; Property details &amp; links</span><span class="sum-val" id="propDetailSum"></span></summary>
+    <div class="inner">
+      <div class="prop-addr-row" style="margin-top:8px;">
+        <input type="text" id="propAddress" placeholder="Property address (e.g. 123 Main St, Springfield, IL 62704)">
+        <button class="btn primary" id="propFetch">Pull data</button>
+      </div>
+      <div class="prop-facts" style="margin-top:10px;">
+        <div class="pf-item"><label>Beds</label><input class="num small" id="prop_beds" data-fmt="raw" value=""></div>
+        <div class="pf-item"><label>Baths</label><input class="num small" id="prop_baths" data-fmt="raw" value=""></div>
+        <div class="pf-item"><label>Sq ft</label><input class="num small" id="prop_sqft" data-fmt="raw" value=""></div>
+        <div class="pf-item"><label>Year built</label><input class="num small" id="prop_year" data-fmt="raw" value=""></div>
+        <div class="pf-item"><label>List price</label><input class="num small" id="prop_list" data-fmt="money" value=""></div>
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <label>Video tour URL</label>
+      </div>
+      <div class="url-row" style="grid-template-columns: 1fr 30px;">
+        <input type="text" id="videoUrl" placeholder="https://youtu.be/… or Matterport, etc.">
+        <button class="del" id="videoOpen" title="Open">↗</button>
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <label>Other links <span class="sub">pictures, county records, listing pages…</span></label>
+        <button class="btn" id="urlAdd" style="font-size:11.5px; padding:6px 10px;">+ Add link</button>
+      </div>
+      <div id="urlList"></div>
+      <div class="row" style="border-top:1px dashed var(--line); margin-top:8px;">
+        <label>RentCast API key <span class="sub">enables “Pull data” auto-fill · free tier at rentcast.io/api</span></label>
+        <input class="num" id="rcKey" data-fmt="text" style="width:170px; text-align:left; font-size:12px;" placeholder="paste key…">
+      </div>
+    </div>
+  </details>
+</div>
+
+<nav class="tabs">
+  <button class="tab on" data-pane="analyzer">Deal Analyzer</button>
+  <button class="tab" data-pane="salescomps">Sales Comps</button>
+  <button class="tab" data-pane="rentcomps">Rental Comps</button>
+  <button class="tab" data-pane="capex">CapEx <span class="badge" id="capexBadge" style="display:none;"></span></button>
+  <button class="tab" data-pane="hood">Neighborhood</button>
+  <button class="tab" data-pane="sow">Scope of Work <span class="badge" id="sowBadge">$0</span></button>
+</nav>
+
+<!-- ======================= ANALYZER TAB ======================= -->
+<section class="pane on" id="pane-analyzer">
+
+<div class="grid">
+  <!-- LEFT: INPUTS -->
+  <div>
+    <div class="card dense">
+      <h2>Acquisition <span class="tag">Purchase</span></h2>
+      <div class="body">
+        <div class="row"><label>Purchase price</label><input class="num" id="price" data-fmt="money" value="250,000"></div>
+        <div class="slider-row">
+          <div class="slider-head"><label>Down payment</label><output id="downOut">20% · $50,000</output></div>
+          <input type="range" id="downPct" min="0" max="100" step="1" value="20">
+        </div>
+        <div class="row"><label>Rehab / initial repairs <span class="sub" id="rehabSub">enter manually, or build a Scope of Work</span></label><input class="num" id="rehab" data-fmt="money" value="10,000"></div>
+        <div class="row"><label>Closing costs <span class="sub" id="closingSub"></span></label>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input class="num small" id="closing" data-fmt="raw" value="6000">
+            <div class="unit-toggle" id="closingToggle">
+              <button type="button" data-u="$" class="on">$</button>
+              <button type="button" data-u="%">% price</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card dense">
+      <h2>Financing <span class="tag">Stack</span></h2>
+      <div class="body">
+        <div class="row"><label>New loan — interest rate</label>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input class="num small" id="rate" data-fmt="raw" value="7">
+            <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">%</span>
+          </div>
+        </div>
+        <div class="row"><label>New loan — term</label>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input class="num small" id="term" data-fmt="raw" value="30">
+            <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">yrs</span>
+          </div>
+        </div>
+        <div class="row">
+          <label>Interest-only <span class="sub">pay only interest for a set period</span></label>
+          <label class="switch"><input type="checkbox" id="ioOn"><span class="sl"></span></label>
+        </div>
+        <div class="fin-sub" id="ioSub">
+          <div class="row"><label>Interest-only period <span class="sub">set equal to the term for full-term IO (balloon)</span></label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input class="num small" id="io_years" data-fmt="raw" value="10">
+              <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">yrs</span>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <label>ARM <span class="sub">adjustable rate — fixed intro period, then adjusts</span></label>
+          <label class="switch"><input type="checkbox" id="armOn"><span class="sl"></span></label>
+        </div>
+        <div class="fin-sub" id="armSub">
+          <div class="row"><label>Fixed period</label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input class="num small" id="arm_fixed" data-fmt="raw" value="7">
+              <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">yrs</span>
+            </div>
+          </div>
+          <div class="row"><label>Adjusts every</label>
+            <select id="arm_freq">
+              <option value="6">6 months</option>
+              <option value="12">12 months</option>
+            </select>
+          </div>
+          <div class="row"><label>Expected rate after adjustment</label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input class="num small" id="arm_rate" data-fmt="raw" value="8.5">
+              <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">%</span>
+            </div>
+          </div>
+          <div class="row"><label>Structure</label><span id="armLabel" style="font-family:var(--mono); font-weight:600; font-size:13px;">7/6 ARM</span></div>
+        </div>
+
+        <details class="collapse" id="creativeCollapse">
+          <summary><span><span class="chev">▶</span>&nbsp; Creative financing</span><span class="sum-val" id="creativeSum">off</span></summary>
+          <div class="inner">
+            <div class="row" style="padding-bottom:2px;">
+              <label><strong style="color:var(--ink)">Seller financing</strong></label>
+              <label class="switch"><input type="checkbox" id="sellerOn"><span class="sl"></span></label>
+            </div>
+            <div class="fin-sub" id="sellerSub">
+              <div class="row"><label>Amount carried</label><input class="num" id="seller_amt" data-fmt="money" value="0"></div>
+              <div class="row"><label>Interest rate</label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <input class="num small" id="seller_rate" data-fmt="raw" value="6">
+                  <span style="font-family:var(--mono);font-size:12px;color:var(--ink-faint)">%</span>
+                </div>
+              </div>
+              <div class="row"><label>Term</label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <input class="num small" id="seller_term" data-fmt="raw" value="30">
+                  <span style="font-family:var(--mono);font-size:12px;color:var(--ink-faint)">yrs</span>
+                </div>
+              </div>
+              <div class="row"><label>Payment type</label>
+                <select id="seller_type">
+                  <option value="am">Amortizing</option>
+                  <option value="io">Interest-only</option>
+                </select>
+              </div>
+            </div>
+            <div class="row" style="padding-bottom:2px;">
+              <label><strong style="color:var(--ink)">Subject-to <span class="sub">take over existing mortgage</span></strong></label>
+              <label class="switch"><input type="checkbox" id="subtoOn"><span class="sl"></span></label>
+            </div>
+            <div class="fin-sub" id="subtoSub">
+              <div class="row"><label>Existing balance</label><input class="num" id="subto_bal" data-fmt="money" value="0"></div>
+              <div class="row"><label>Interest rate</label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <input class="num small" id="subto_rate" data-fmt="raw" value="4">
+                  <span style="font-family:var(--mono);font-size:12px;color:var(--ink-faint)">%</span>
+                </div>
+              </div>
+              <div class="row"><label>Remaining term</label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <input class="num small" id="subto_term" data-fmt="raw" value="26">
+                  <span style="font-family:var(--mono);font-size:12px;color:var(--ink-faint)">yrs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <div class="fin-summary" id="finSummary"></div>
+        <div class="fin-warn" id="finWarn"></div>
+      </div>
+    </div>
+
+    <div class="card" id="mcfCard">
+      <h2>Monthly Cash Flow — Year 1 <span class="tag">Income · Expenses · Debt</span></h2>
+      <div class="body">
+        <div class="row"><label class="sec-label">Income</label></div>
+        <div class="row"><label>Gross monthly rent</label><input class="num" id="rent" data-fmt="money" value="2,000"></div>
+        <div class="row util-head" id="oiHead">
+          <label><span class="chev">▶</span>Other income</label>
+          <span class="util-total" id="otherIncSum">$0/mo</span>
+        </div>
+        <div class="util-body" id="oiBody">
+          <div class="row"><label>Laundry</label><input class="num small oi" id="oi_laundry" data-fmt="money" value="0"></div>
+          <div class="row"><label>Parking</label><input class="num small oi" id="oi_parking" data-fmt="money" value="0"></div>
+          <div class="row"><label>Storage</label><input class="num small oi" id="oi_storage" data-fmt="money" value="0"></div>
+          <div class="row"><label>Pet rent</label><input class="num small oi" id="oi_pet" data-fmt="money" value="0"></div>
+          <div class="row"><label>Other</label><input class="num small oi" id="oi_other" data-fmt="money" value="0"></div>
+        </div>
+        <div class="row comp"><label id="vacLbl">Vacancy (5%)</label><span class="comp-val amt-neg" id="vacVal">—</span></div>
+        <div class="row comp subtotal"><label>Effective income</label><span class="comp-val" id="effIncVal">—</span></div>
+
+        <div class="row"><label class="sec-label">Operating expenses</label></div>
+        <div id="expenseRows"><!-- built by JS --></div>
+        <div class="row util-head" id="utilHead">
+          <label><span class="chev">▶</span>Utilities</label>
+          <span class="util-total" id="utilSum">$0/mo</span>
+        </div>
+        <div class="util-body" id="utilBody">
+          <!-- rows built by JS -->
+          <div class="row" id="utilSummaryRow" style="border-top:1px dashed var(--line); margin-top:4px;">
+            <label style="font-weight:700; color:var(--ink);">Utilities — monthly total</label>
+            <span class="util-total" id="utilMonthlyTotal" style="font-weight:600;">$0/mo</span>
+          </div>
+        </div>
+        <div class="row comp subtotal"><label>Total operating expenses</label><span class="comp-val amt-neg" id="opExVal">—</span></div>
+        <div class="row comp"><label style="font-weight:700; color:var(--ink);">Net operating income</label><span class="comp-val" id="noiVal">—</span></div>
+
+        <div class="row"><label class="sec-label">Debt service</label></div>
+        <div id="debtRowsBox"></div>
+        <div class="row comp subtotal"><label>Cash flow</label><span class="comp-val" id="cfTotalVal">—</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT: RESULTS -->
+  <div>
+    <div class="verdict good" id="verdict">
+      <div class="dot"></div>
+      <div>
+        <div class="v-title" id="verdictTitle">—</div>
+        <div class="v-sub" id="verdictSub">—</div>
+      </div>
+    </div>
+
+    <div class="card assume" style="margin-bottom:16px;">
+      <h2>Variable Assumptions <span class="tag">Watch the numbers react</span></h2>
+      <div class="body">
+        <div class="slider-row">
+          <div class="slider-head"><label>Vacancy</label><output id="vacancyOut">5%</output></div>
+          <input type="range" id="vacancy" min="0" max="20" step="0.5" value="5">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><label>Annual rent growth</label><output id="rentGrowthOut">3%</output></div>
+          <input type="range" id="rentGrowth" min="0" max="10" step="0.25" value="3">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><label>Annual expense growth</label><output id="expGrowthOut">2.5%</output></div>
+          <input type="range" id="expGrowth" min="0" max="10" step="0.25" value="2.5">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><label>Annual appreciation</label><output id="apprOut">3%</output></div>
+          <input type="range" id="appr" min="0" max="10" step="0.25" value="3">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><label>Selling costs at exit</label><output id="sellCostOut">7%</output></div>
+          <input type="range" id="sellCost" min="0" max="12" step="0.5" value="7">
+        </div>
+      </div>
+    </div>
+
+    <div class="tiles">
+      <div class="tile hero"><div class="t-label">Cash-on-Cash Return</div><div class="t-value" id="cocOut">—</div><div class="t-note">year-1 cash flow ÷ cash invested</div></div>
+      <div class="tile"><div class="t-label">Monthly Cash Flow</div><div class="t-value" id="cfOut">—</div><div class="t-note">after all expenses &amp; debt</div></div>
+      <div class="tile"><div class="t-label">DSCR</div><div class="t-value" id="dscrOut">—</div><div class="t-note">NOI ÷ debt service · lenders want ≥ 1.25</div></div>
+      <div class="tile"><div class="t-label">5-Year Total ROI</div><div class="t-value" id="roi5Out">—</div><div class="t-note">cash flow + equity + appreciation</div></div>
+    </div>
+
+    <div class="checks">
+      <div class="check" id="rule1"><span class="mark">✓</span>1% Rule <span class="val" id="rule1Val">—</span></div>
+      <div class="check" id="grmCheck"><span class="mark">✓</span>GRM <span class="val" id="grmVal">—</span></div>
+      <div class="check" id="cashCheck"><span class="mark">$</span>Cash Needed <span class="val" id="cashVal">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>5-Year Pro-Forma <span class="tag">Annual</span></h2>
+      <div class="body pf-scroll"><table class="pf" id="pfTable"></table></div>
+    </div>
+
+    <div class="card">
+      <h2>If You Sold in Year 5 <span class="tag">Exit Analysis</span></h2>
+      <div class="body">
+        <div class="exit-grid">
+          <div class="exit-box"><div class="e-label">Net Sale Proceeds</div><div class="e-value" id="exitProceeds">—</div></div>
+          <div class="exit-box"><div class="e-label">Total Profit</div><div class="e-value" id="exitProfit">—</div></div>
+          <div class="exit-box"><div class="e-label">Annualized Return</div><div class="e-value" id="exitIrr">—</div></div>
+        </div>
+        <p class="footnote" style="margin-top:12px;">Net sale proceeds = year-5 value, less selling costs of <span id="exitCostNote">7%</span>, less payoff of all remaining loan balances. Total profit = net proceeds + 5 years of accumulated cash flow − cash invested.</p>
+      </div>
+    </div>
+
+    <p class="footnote">Estimates for screening purposes only — verify taxes, insurance and rents locally before making offers. Percentage-based expenses are calculated on gross scheduled rent. NOI here includes the capex reserve as an operating cost, so the DSCR shown is the conservative view (many lenders exclude capex, which would show a higher ratio).</p>
+  </div>
+</div>
+</section>
+
+<!-- ======================= SALES COMPS TAB ======================= -->
+<section class="pane" id="pane-salescomps">
+  <div class="card">
+    <h2>Sales Comps <span class="tag">Recently sold nearby</span></h2>
+    <div class="body">
+      <div class="comp-scroll">
+        <div class="comp-head"><span>Address</span><span>Sale price</span><span>Sqft</span><span>Bd</span><span>Ba</span><span style="text-align:right">$/sqft</span><span></span></div>
+        <div id="salesCompList"></div>
+      </div>
+      <button class="btn sow-add-btn" id="salesCompAdd">+ Add comp</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Value Estimate <span class="tag">From comps</span></h2>
+    <div class="body">
+      <div class="exit-grid">
+        <div class="exit-box"><div class="e-label">Median Sale Price</div><div class="e-value" id="scMedian">—</div></div>
+        <div class="exit-box"><div class="e-label">Avg $ / Sqft</div><div class="e-value" id="scAvgPsf">—</div></div>
+        <div class="exit-box"><div class="e-label">Est. Value (ARV)</div><div class="e-value" id="scArv">—</div></div>
+      </div>
+      <p class="footnote" id="scNote" style="margin-top:10px;"></p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= RENTAL COMPS TAB ======================= -->
+<section class="pane" id="pane-rentcomps">
+  <div class="card">
+    <h2>Rental Comps <span class="tag">What nearby units rent for</span></h2>
+    <div class="body">
+      <div class="comp-scroll">
+        <div class="comp-head"><span>Address</span><span>Monthly rent</span><span>Sqft</span><span>Bd</span><span>Ba</span><span style="text-align:right">$/sqft</span><span></span></div>
+        <div id="rentCompList"></div>
+      </div>
+      <button class="btn sow-add-btn" id="rentCompAdd">+ Add comp</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Rent Estimate <span class="tag">From comps</span></h2>
+    <div class="body">
+      <div class="exit-grid">
+        <div class="exit-box"><div class="e-label">Average Rent</div><div class="e-value" id="rcAvg">—</div></div>
+        <div class="exit-box"><div class="e-label">Avg Rent / Sqft</div><div class="e-value" id="rcAvgPsf">—</div></div>
+        <div class="exit-box"><div class="e-label">Est. Market Rent</div><div class="e-value" id="rcEst">—</div></div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <span class="footnote" id="rcNote" style="margin:0; flex:1;"></span>
+        <button class="btn primary" id="rcApply" style="font-size:12px;">Use as gross rent</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= CAPEX TAB ======================= -->
+<section class="pane" id="pane-capex">
+  <div class="card">
+    <h2>Capital Expenditures <span class="tag">Big-ticket items &amp; condition</span></h2>
+    <div class="body">
+      <div id="capexList"></div>
+      <button class="btn sow-add-btn" id="capexAdd">+ Add item</button>
+      <p class="footnote">Ages are computed from the install year against typical lifespans — items at or past their typical life are flagged <span style="color:var(--neg); font-weight:600;">in red</span> so you can budget replacements into your CapEx reserve or Scope of Work. Everything here saves with the deal and appears in the PDF report.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= NEIGHBORHOOD TAB ======================= -->
+<section class="pane" id="pane-hood">
+  <div class="card">
+    <h2>Quick Research Links <span class="tag">Opens in new tabs</span></h2>
+    <div class="body">
+      <div class="prop-chips" id="hoodLinks" style="margin-top:2px;"></div>
+      <p class="footnote" id="hoodLinkNote" style="margin-top:10px;"></p>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Neighborhood Notes <span class="tag">Saved with the deal</span></h2>
+    <div class="body">
+      <div class="row"><label>Crime level <span class="sub">your read after checking the crime maps</span></label>
+        <select id="hood_crime" class="hood-select">
+          <option value="">Not checked</option>
+          <option>Low</option>
+          <option>Moderate</option>
+          <option>High</option>
+        </select>
+      </div>
+      <div class="row"><label>Schools rating <span class="sub">e.g. GreatSchools score 1–10</span></label><input class="num small" id="hood_schools" data-fmt="raw" value=""></div>
+      <div class="row"><label>Notes <span class="sub">new developments, zoning changes, employers, flooding, gut feel…</span></label></div>
+      <textarea id="hood_notes" rows="6" placeholder="e.g. New shopping center approved two blocks away · street floods after heavy rain per neighbor · hospital expansion bringing 400 jobs in 2027…"></textarea>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= SCOPE OF WORK TAB ======================= -->
+<section class="pane" id="pane-sow">
+  <div class="sow-toolbar">
+    <div class="left">
+      <button class="btn primary" id="sowDownload">⬇ Download for contractor</button>
+    </div>
+    <div class="sow-total-chip"><span class="lbl">Rehab total</span><span class="val" id="sowTotal">$0</span></div>
+  </div>
+  <div id="sowSections"><!-- built by JS --></div>
+  <div class="card sow-cat-summary">
+    <h2>Totals by Section <span class="tag">Summary</span></h2>
+    <div class="body"><table id="sowCatTable"></table></div>
+  </div>
+  <p class="footnote">The Scope of Work saves with the deal. While it has line items, the analyzer's rehab field is locked to this total; delete all items to enter rehab manually again. The download produces a clean document you can email or print for contractor bids.</p>
+</section>
+
+</div>
+
+<div class="voice-modal" id="voiceModal">
+  <div class="voice-card">
+    <h3 id="voiceTitle"><span class="rec-dot"></span>Listening…</h3>
+    <p class="voice-hint" id="voiceHint">Say your numbers naturally, e.g. “purchase price 320,000 … rent 2,800 … down payment 20 percent … property tax 4,200 a year … insurance 150 a month … vacancy 7 percent”. Tap <strong>Stop &amp; apply</strong> when you're done.</p>
+    <div class="voice-transcript" id="voiceTranscript"><span class="interim">…</span></div>
+    <div class="voice-results" id="voiceResults"></div>
+    <div class="voice-actions">
+      <button class="btn primary" id="voiceStop">■ Stop &amp; apply</button>
+      <button class="btn ghost" id="voiceCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast">Saved</div>
+
+<script src="shell.js"></script>
+<script>
+'use strict';
+
+/* ---------------- definitions ---------------- */
+/* mode 'time': $/mo vs $/yr · mode 'rent': $/mo vs % of rent */
+const EXPENSES = [
+  { id:'tax',       label:'Property tax',          mode:'time', unit:'mo', val:250 },
+  { id:'ins',       label:'Insurance',             mode:'time', unit:'mo', val:120 },
+  { id:'hoa',       label:'HOA fees',              mode:'time', unit:'mo', val:0 },
+  { id:'mgmt',      label:'Property management',   mode:'rent', unit:'%',  val:10 },
+  { id:'maint',     label:'Maintenance & repairs', mode:'rent', unit:'%',  val:8 },
+  { id:'capex',     label:'CapEx reserve',         mode:'rent', unit:'%',  val:8 },
+  { id:'landscape', label:'Landscaping',           mode:'time', unit:'mo', val:0 },
+  { id:'cleaning',  label:'Cleaning',              mode:'time', unit:'mo', val:0 },
+  { id:'pest',      label:'Pest control',          mode:'time', unit:'mo', val:0 },
+  { id:'misc',      label:'Miscellaneous',         mode:'time', unit:'mo', val:0 },
+];
+const UTIL_LABELS = { electric:'Electricity', water:'Water', sewer:'Sewer', trash:'Trash', gas:'Gas', internet:'Internet' };
+const UNIT_LABELS = { mo:'$/mo', yr:'$/yr', '$':'$/mo', '%':'% rent' };
+const UTILS = ['electric','water','sewer','trash','gas','internet'];
+const OTHER_INC = ['laundry','parking','storage','pet','other'];
+const SOW_SECTIONS = [
+  { id:'kitchen',   label:'Kitchen' },
+  { id:'bathrooms', label:'Bathrooms' },
+  { id:'bedrooms',  label:'Bedrooms' },
+  { id:'living',    label:'Living Areas' },
+  { id:'exterior',  label:'Exterior & Roof' },
+  { id:'systems',   label:'Systems — HVAC · Plumbing · Electrical' },
+  { id:'landscaping', label:'Landscaping' },
+  { id:'other',     label:'Other' },
+];
+const STORE_KEY = 'rentalDeals.v3';
+const DRAFT_KEY = 'rentalCalc.draft.v3';
+
+/* Google sign-in lives in shell.js — deals are namespaced per signed-in user */
+const storeKey = () => { const u = window.Shell?.getUser(); return u?.sub ? `${STORE_KEY}.u.${u.sub}` : STORE_KEY; };
+const draftKey = () => { const u = window.Shell?.getUser(); return u?.sub ? `${DRAFT_KEY}.u.${u.sub}` : DRAFT_KEY; };
+
+const $ = id => document.getElementById(id);
+const money = n => (n<0?'−$':'$') + Math.round(Math.abs(n)).toLocaleString('en-US');
+const money0 = n => '$' + Math.round(Math.abs(n)).toLocaleString('en-US');
+const pct = (n,d=1) => (isFinite(n)? n.toFixed(d):'—') + '%';
+const stripZeros = s => s.replace(/\.?0+%$/,'%');
+const parseNum = s => { const n = parseFloat(String(s).replace(/[^0-9.\-]/g,'')); return isFinite(n)? n:0; };
+
+/* ---------------- tabs ---------------- */
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x===t));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === 'pane-'+t.dataset.pane));
+}));
+
+/* ---------------- expense rows ---------------- */
+const expWrap = $('expenseRows');
+EXPENSES.forEach(e => {
+  const units = e.mode === 'time' ? ['mo','yr'] : ['$','%'];
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = `
+    <label>${e.label} <span class="exp-hint" id="hint_${e.id}"></span></label>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <input class="num small" id="exp_${e.id}" data-fmt="raw" value="${e.val}">
+      <div class="unit-toggle" data-exp="${e.id}">
+        ${units.map(u => `<button type="button" data-u="${u}" class="${e.unit===u?'on':''}">${UNIT_LABELS[u]}</button>`).join('')}
+      </div>
+    </div>`;
+  expWrap.appendChild(row);
+});
+const expUnits = Object.fromEntries(EXPENSES.map(e => [e.id, e.unit]));
+document.querySelectorAll('.unit-toggle[data-exp]').forEach(t => {
+  t.addEventListener('click', ev => {
+    const b = ev.target.closest('button'); if (!b) return;
+    const id = t.dataset.exp;
+    const prev = expUnits[id];
+    if (prev !== b.dataset.u) {
+      /* converting between $/mo and $/yr keeps the same real cost */
+      const inp = $('exp_'+id);
+      const v = parseNum(inp.value);
+      if (prev==='mo' && b.dataset.u==='yr') inp.value = Math.round(v*12);
+      if (prev==='yr' && b.dataset.u==='mo') inp.value = Math.round(v/12);
+    }
+    expUnits[id] = b.dataset.u;
+    t.querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+    calc();
+  });
+});
+/* ---------------- utilities rows (each $/mo or $/yr) ---------------- */
+const utilUnits = Object.fromEntries(UTILS.map(k => [k,'mo']));
+{
+  const summaryRow = $('utilSummaryRow');
+  UTILS.forEach(k => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <label>${UTIL_LABELS[k]}</label>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <input class="num small ut" id="ut_${k}" data-fmt="raw" value="0">
+        <div class="unit-toggle" data-util="${k}">
+          <button type="button" data-u="mo" class="on">$/mo</button>
+          <button type="button" data-u="yr">$/yr</button>
+        </div>
+      </div>`;
+    summaryRow.parentNode.insertBefore(row, summaryRow);
+  });
+  document.querySelectorAll('.unit-toggle[data-util]').forEach(t => {
+    t.addEventListener('click', ev => {
+      const b = ev.target.closest('button'); if (!b) return;
+      const k = t.dataset.util;
+      if (utilUnits[k] !== b.dataset.u){
+        const inp = $('ut_'+k);
+        const v = parseNum(inp.value);
+        inp.value = b.dataset.u === 'yr' ? Math.round(v*12) : Math.round(v/12);
+      }
+      utilUnits[k] = b.dataset.u;
+      t.querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+      calc();
+    });
+  });
+}
+function setUtilUnit(k, u){
+  utilUnits[k] = u;
+  const t = document.querySelector(`.unit-toggle[data-util="${k}"]`);
+  if (t) t.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.u === u));
+}
+
+/* ---------------- closing costs: $ or % of price ---------------- */
+let closingUnit = '$';
+function setClosingUnit(u){
+  closingUnit = u;
+  $('closingToggle').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.u === u));
+}
+$('closingToggle').addEventListener('click', ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  if (closingUnit !== b.dataset.u){
+    const price = parseNum($('price').value);
+    const inp = $('closing');
+    const v = parseNum(inp.value);
+    if (b.dataset.u === '%') inp.value = price > 0 ? +(v/price*100).toFixed(2) : 0;
+    else inp.value = Math.round(price*v/100);
+  }
+  setClosingUnit(b.dataset.u);
+  calc();
+});
+
+/* monthly cost of one expense line */
+function expMonthly(unit, v, rent){
+  if (unit === '%') return rent * v/100;
+  if (unit === 'yr') return v/12;
+  return v; /* 'mo' or '$' */
+}
+
+/* ---------------- scope of work ---------------- */
+let sowItems = []; // {sec, desc, cost}
+
+function sowRender(){
+  const openSecs = new Set([...document.querySelectorAll('.sow-section details[open]')].map(d => d.dataset.sec));
+  const wrap = $('sowSections');
+  wrap.innerHTML = '';
+  SOW_SECTIONS.forEach(sec => {
+    const items = sowItems.filter(i => i.sec === sec.id);
+    const subtotal = items.reduce((s,i)=> s + (i.cost||0), 0);
+    const card = document.createElement('div');
+    card.className = 'card sow-section';
+    card.innerHTML = `
+      <details class="collapse" style="border:none;margin:0;background:none;" data-sec="${sec.id}" ${items.length||openSecs.has(sec.id)?'open':''}>
+        <summary style="padding:13px 18px;"><span><span class="chev">▶</span>&nbsp; <span style="font-family:var(--display);font-size:14.5px;color:var(--ink)">${sec.label}</span></span>
+          <span class="sum-val">${money0(subtotal)}</span></summary>
+        <div class="inner" style="padding:4px 18px 14px;">
+          <div class="sow-items"></div>
+          <button class="btn sow-add-btn" data-add="${sec.id}">+ Add item</button>
+        </div>
+      </details>`;
+    const list = card.querySelector('.sow-items');
+    items.forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'sow-item';
+      el.innerHTML = `
+        <input type="text" placeholder="Description (e.g. replace cabinets & counters)" value="${escapeAttr(item.desc)}">
+        <input class="num" inputmode="decimal" placeholder="Cost" value="${item.cost? Math.round(item.cost).toLocaleString('en-US'):''}">
+        <button class="del" title="Remove">✕</button>`;
+      const [desc, cost] = el.querySelectorAll('input');
+      desc.addEventListener('input', ()=> { item.desc = desc.value; sowSoft(); });
+      cost.addEventListener('input', ()=> { item.cost = parseNum(cost.value); sowSoft(); });
+      cost.addEventListener('blur', ()=> { cost.value = item.cost? Math.round(item.cost).toLocaleString('en-US'):''; sowSync(); });
+      el.querySelector('.del').addEventListener('click', ()=> {
+        sowItems = sowItems.filter(x => x !== item);
+        sowRender(); sowSync();
+      });
+      list.appendChild(el);
+    });
+    card.querySelector('[data-add]').addEventListener('click', ev => {
+      sowItems.push({ sec: sec.id, desc:'', cost:0 });
+      sowRender(); sowSync();
+      const secEl = document.querySelector(`.sow-section details[data-sec="${sec.id}"]`);
+      const inputs = secEl.querySelectorAll('.sow-item input[type=text]');
+      if (inputs.length) inputs[inputs.length-1].focus();
+    });
+    wrap.appendChild(card);
+  });
+}
+function sowTotal(){ return sowItems.reduce((s,i)=> s + (i.cost||0), 0); }
+/* light sync while typing (no re-render, keeps focus) */
+function sowSoft(){
+  const total = sowTotal();
+  $('sowTotal').textContent = money0(total);
+  $('sowBadge').textContent = money0(total);
+  syncRehabField();
+  calc();
+}
+function syncRehabField(){
+  const total = sowTotal();
+  const rehabEl = $('rehab');
+  if (sowItems.length){
+    rehabEl.value = Math.round(total).toLocaleString('en-US');
+    rehabEl.setAttribute('readonly','');
+    $('rehabSub').textContent = 'synced from Scope of Work';
+  } else {
+    rehabEl.removeAttribute('readonly');
+    $('rehabSub').textContent = 'enter manually, or build a Scope of Work';
+  }
+}
+function sowSync(){
+  sowSoft();
+  /* section subtotals + summary table */
+  SOW_SECTIONS.forEach(sec => {
+    const d = document.querySelector(`.sow-section details[data-sec="${sec.id}"]`);
+    if (d) d.querySelector('.sum-val').textContent = money0(sowItems.filter(i=>i.sec===sec.id).reduce((s,i)=>s+(i.cost||0),0));
+  });
+  const rows = SOW_SECTIONS
+    .map(sec => [sec.label, sowItems.filter(i=>i.sec===sec.id).reduce((s,i)=>s+(i.cost||0),0)])
+    .filter(([,v]) => v > 0)
+    .map(([l,v]) => `<tr><td>${l}</td><td>${money0(v)}</td></tr>`).join('');
+  $('sowCatTable').innerHTML = rows + `<tr><td>Total rehab budget</td><td>${money0(sowTotal())}</td></tr>`;
+}
+
+/* download a clean contractor-ready document */
+$('sowDownload').addEventListener('click', () => {
+  const name = getDealName() || 'Property';
+  const date = new Date().toLocaleDateString('en-US', {year:'numeric', month:'long', day:'numeric'});
+  const secHtml = SOW_SECTIONS.map(sec => {
+    const items = sowItems.filter(i => i.sec===sec.id && (i.desc.trim() || i.cost));
+    if (!items.length) return '';
+    const sub = items.reduce((s,i)=>s+(i.cost||0),0);
+    return `
+    <h2>${sec.label}</h2>
+    <table>
+      <thead><tr><th>Item</th><th class="c">Est. Cost</th></tr></thead>
+      <tbody>
+        ${items.map(i=>`<tr><td>${escapeHtml(i.desc||'—')}</td><td class="c">${money0(i.cost||0)}</td></tr>`).join('')}
+        <tr class="sub"><td>Subtotal — ${sec.label}</td><td class="c">${money0(sub)}</td></tr>
+      </tbody>
+    </table>`;
+  }).join('');
+  const doc = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Scope of Work — ${escapeHtml(name)}</title>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; color:#222; max-width:720px; margin:40px auto; padding:0 24px; line-height:1.5; }
+  header { border-bottom:3px double #222; padding-bottom:14px; margin-bottom:24px; }
+  h1 { font-size:26px; margin:0; }
+  .meta { color:#666; font-size:14px; margin-top:4px; }
+  h2 { font-size:16px; text-transform:uppercase; letter-spacing:.06em; border-bottom:1px solid #999; padding-bottom:4px; margin:28px 0 8px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#666; padding:6px 4px; border-bottom:1px solid #ccc; }
+  td { padding:7px 4px; border-bottom:1px solid #eee; vertical-align:top; }
+  .c { text-align:right; white-space:nowrap; width:110px; }
+  tr.sub td { font-weight:bold; border-top:1px solid #999; border-bottom:none; }
+  .grand { margin-top:30px; border-top:3px double #222; padding-top:12px; display:flex; justify-content:space-between; font-size:18px; font-weight:bold; }
+  .note { margin-top:36px; font-size:12px; color:#777; border-top:1px solid #ddd; padding-top:10px; }
+  .sign { margin-top:48px; display:flex; gap:40px; }
+  .sign div { flex:1; border-top:1px solid #222; padding-top:6px; font-size:13px; color:#444; }
+  @media print { body { margin:0 auto; } }
+</style></head>
+<body>
+<header>
+  <h1>Scope of Work</h1>
+  <div class="meta">${escapeHtml(name)} &nbsp;·&nbsp; Prepared ${date}</div>
+</header>
+${secHtml || '<p><em>No line items entered.</em></p>'}
+<div class="grand"><span>Total Rehab Budget</span><span>${money0(sowTotal())}</span></div>
+<p class="note">Costs are owner estimates for bidding purposes. Contractor to confirm quantities, materials and pricing. Please itemize any exclusions in your bid.</p>
+<div class="sign"><div>Owner — Date</div><div>Contractor — Date</div></div>
+</body></html>`;
+  const blob = new Blob([doc], {type:'text/html'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `Scope of Work - ${name.replace(/[^\w\- ]+/g,'')}.html`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=> URL.revokeObjectURL(a.href), 5000);
+  toast('Scope of Work downloaded — open it and print to PDF if needed');
+});
+
+/* ---------------- editable deal name ---------------- */
+const getDealName = () => $('dealName').textContent.trim();
+const setDealName = v => { $('dealName').textContent = v || ''; };
+$('dealName').addEventListener('input', calc);
+$('dealName').addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); $('dealName').blur(); } });
+$('dealName').addEventListener('paste', e => {
+  e.preventDefault();
+  document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain').replace(/\n/g,' '));
+});
+
+/* ---------------- property header ---------------- */
+let otherUrls = []; // {label, url}
+const normUrl = u => {
+  u = String(u||'').trim();
+  if (!u) return '';
+  return /^https?:\/\//i.test(u) ? u : 'https://' + u;
+};
+const openUrl = u => { const n = normUrl(u); if (n) window.open(n, '_blank', 'noopener'); };
+
+function renderUrls(){
+  const list = $('urlList');
+  list.innerHTML = '';
+  otherUrls.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'url-row';
+    row.innerHTML = `
+      <input type="text" placeholder="Label (Photos…)" value="${escapeAttr(item.label)}">
+      <input type="text" placeholder="https://…" value="${escapeAttr(item.url)}">
+      <button class="del" title="Remove">✕</button>`;
+    const [lab, url] = row.querySelectorAll('input');
+    lab.addEventListener('input', ()=> { item.label = lab.value; calc(); });
+    url.addEventListener('input', ()=> { item.url = url.value; calc(); });
+    row.querySelector('.del').addEventListener('click', ()=> {
+      otherUrls = otherUrls.filter(x => x !== item);
+      renderUrls(); calc();
+    });
+    list.appendChild(row);
+  });
+}
+$('urlAdd').addEventListener('click', () => {
+  otherUrls.push({label:'', url:''});
+  renderUrls(); calc();
+  const rows = $('urlList').querySelectorAll('.url-row input');
+  if (rows.length) rows[rows.length-2].focus();
+});
+$('videoOpen').addEventListener('click', () => openUrl($('videoUrl').value));
+['propAddress','videoUrl'].forEach(id => $(id).addEventListener('input', calc));
+$('rcKey').addEventListener('input', () => { try { localStorage.setItem('rentcastKey', $('rcKey').value.trim()); } catch {} });
+
+function chipEl(html, href, cls=''){
+  const el = document.createElement(href ? 'a' : 'span');
+  el.className = 'p-chip' + (cls?' '+cls:'');
+  el.innerHTML = html;
+  if (href){ el.href = href; el.target = '_blank'; el.rel = 'noopener'; }
+  return el;
+}
+function renderPropChips(s){
+  const chips = [];
+  const chip = (html, href, cls='') => chips.push([html, href, cls]);
+  const p = s.prop;
+  const enc = encodeURIComponent(p.address);
+  if (p.address){
+    chip('Google Maps ↗', 'https://www.google.com/maps/search/?api=1&query='+enc);
+    chip('Zillow ↗', 'https://www.zillow.com/homes/'+enc+'_rb/');
+    chip('Realtor ↗', 'https://www.realtor.com/search?query='+enc);
+  }
+  const beds = parseNum(p.beds), baths = parseNum(p.baths);
+  if (beds || baths) chip(`<b>${beds||'—'}</b> bd · <b>${baths||'—'}</b> ba`);
+  const sqft = parseNum(p.sqft);
+  if (sqft) chip(`<b>${Math.round(sqft).toLocaleString('en-US')}</b> sqft`);
+  if (parseNum(p.year)) chip('built <b>'+Math.round(parseNum(p.year))+'</b>');
+  if (p.list > 0){
+    chip('listed <b>'+money0(p.list)+'</b>');
+    if (sqft) chip('<b>$'+Math.round(p.list/sqft)+'</b>/sqft');
+  }
+  if (p.video.trim()) chip('▶ Video tour', normUrl(p.video), 'link');
+  p.urls.forEach(u => {
+    if (!u.url.trim()) return;
+    let name = u.label.trim();
+    if (!name){ try { name = new URL(normUrl(u.url)).hostname.replace(/^www\./,''); } catch { name = 'link'; } }
+    chip(escapeHtml(name)+' ↗', normUrl(u.url), 'link');
+  });
+
+  /* chips live in the deal header, above the details panel */
+  const mini = $('propChipsMini');
+  mini.innerHTML = '';
+  chips.forEach(c => mini.appendChild(chipEl(...c)));
+  mini.style.display = chips.length ? '' : 'none';
+
+  const linkCount = (p.video.trim()?1:0) + p.urls.filter(u=>u.url.trim()).length;
+  $('propDetailSum').textContent = linkCount ? `${linkCount} link${linkCount>1?'s':''}` : '';
+}
+
+/* RentCast auto-fill (optional API key) */
+$('propFetch').addEventListener('click', async () => {
+  const addr = $('propAddress').value.trim();
+  if (!addr){ $('propAddress').focus(); toast('Enter the property address first'); return; }
+  const key = $('rcKey').value.trim();
+  if (!key){
+    $('propDetails').open = true;
+    toast('No API key — use the Zillow/Realtor chips to look it up, or add a free RentCast key for auto-fill');
+    return;
+  }
+  const btn = $('propFetch');
+  btn.disabled = true; btn.textContent = 'Pulling…';
+  const enc = encodeURIComponent(addr);
+  const get = url => fetch(url, {headers:{'X-Api-Key':key, 'Accept':'application/json'}})
+    .then(r => r.ok ? r.json() : Promise.reject(r.status));
+  const [prop, avm, rentAvm] = await Promise.allSettled([
+    get('https://api.rentcast.io/v1/properties?address='+enc),
+    get('https://api.rentcast.io/v1/avm/value?address='+enc),
+    get('https://api.rentcast.io/v1/avm/rent/long-term?address='+enc),
+  ]);
+  const got = [];
+  if (prop.status === 'fulfilled' && prop.value?.[0]){
+    const d = prop.value[0];
+    if (d.bedrooms){ $('prop_beds').value = d.bedrooms; got.push('beds'); }
+    if (d.bathrooms){ $('prop_baths').value = d.bathrooms; got.push('baths'); }
+    if (d.squareFootage){ $('prop_sqft').value = d.squareFootage; got.push('sqft'); }
+    if (d.yearBuilt){ $('prop_year').value = d.yearBuilt; got.push('year built'); }
+    const taxYears = d.propertyTaxes ? Object.keys(d.propertyTaxes).sort() : [];
+    if (taxYears.length){
+      const t = d.propertyTaxes[taxYears[taxYears.length-1]].total;
+      if (t){ setUnit('tax','yr'); $('exp_tax').value = Math.round(t); got.push('property tax'); }
+    }
+  }
+  if (avm.status === 'fulfilled' && avm.value?.price){
+    $('prop_list').value = Math.round(avm.value.price).toLocaleString('en-US');
+    got.push('value estimate');
+  }
+  if (rentAvm.status === 'fulfilled' && rentAvm.value?.rent){
+    setMoneyInput('rent', Math.round(rentAvm.value.rent/50)*50);
+    got.push('rent estimate');
+  }
+  btn.disabled = false; btn.textContent = 'Pull data';
+  if (got.length){ calc(); toast('Auto-filled: ' + got.join(', ')); }
+  else {
+    const failed = [prop, avm, rentAvm].find(x => x.status === 'rejected');
+    toast(failed?.reason === 401 ? 'RentCast rejected the API key' : 'No data returned — check the address or use the quick links');
+  }
+});
+
+/* ---------------- neighborhood research ---------------- */
+['hood_crime'].forEach(id => $(id).addEventListener('change', calc));
+['hood_schools','hood_notes'].forEach(id => $(id).addEventListener('input', calc));
+
+function renderHoodLinks(s){
+  const wrap = $('hoodLinks');
+  const note = $('hoodLinkNote');
+  wrap.innerHTML = '';
+  const addr = s.prop.address;
+  if (!addr){
+    note.textContent = 'Enter the property address in “Property details & links” (deal header) to generate research links for this neighborhood.';
+    return;
+  }
+  const parts = addr.split(',').map(p => p.trim());
+  const city = parts.length > 1 ? parts.slice(1, 3).join(', ') : addr;
+  const g = q => 'https://www.google.com/search?q=' + encodeURIComponent(q);
+  const links = [
+    ['Crime map ↗', g(`crime map ${city}`)],
+    ['CrimeGrade ↗', g(`site:crimegrade.org ${city}`)],
+    ['GreatSchools ↗', 'https://www.greatschools.org/search/search.page?q=' + encodeURIComponent(addr)],
+    ['Niche ↗', g(`site:niche.com places to live ${city}`)],
+    ['City-Data ↗', g(`site:city-data.com ${city}`)],
+    ['AreaVibes ↗', g(`site:areavibes.com ${city}`)],
+    ['News: developments ↗', 'https://news.google.com/search?q=' + encodeURIComponent(`${city} new development construction`)],
+    ['Planning & permits ↗', g(`${city} planning department projects permits`)],
+  ];
+  links.forEach(([t, href]) => wrap.appendChild(chipEl(t, href, 'link')));
+  note.textContent = `Research links for ${city}. Record what you find below — it saves with the deal.`;
+}
+
+/* ---------------- capex tracker ---------------- */
+const THIS_YEAR = new Date().getFullYear();
+const CAPEX_CATS = ['HVAC','Roof & Exterior','Plumbing','Electrical','Structure & Grounds','Interior & Appliances'];
+const CAPEX_TYPES = [
+  { id:'ac',        name:'AC condenser',             cat:'HVAC', life:[12,18], cost:'$4k–$8k',
+    info:'The outdoor unit. Lifespan runs shorter in coastal or desert climates; a failed compressor on an older unit usually means full replacement rather than repair.' },
+  { id:'coils',     name:'Evaporator coils',         cat:'HVAC', life:[10,15], cost:'$1.5k–$4k',
+    info:'The indoor coil that pairs with the condenser. Leaks and corrosion are common failure modes; often replaced together with the condenser to keep refrigerant types matched.' },
+  { id:'furnace',   name:'Furnace / heating',        cat:'HVAC', life:[15,25], cost:'$3k–$7k',
+    info:'Gas furnaces last 15–25 yrs with maintenance. A cracked heat exchanger is the end of the road — it’s a carbon-monoxide hazard and rarely worth repairing.' },
+  { id:'roof',      name:'Roof (asphalt shingle)',   cat:'Roof & Exterior', life:[20,30], cost:'$8k–$15k',
+    info:'Architectural shingles last 20–30 yrs (3-tab closer to 15–20). Check for curling, granule loss and soft decking; metal or tile roofs last far longer.' },
+  { id:'gutters',   name:'Gutters & downspouts',     cat:'Roof & Exterior', life:[15,25], cost:'$1k–$2.5k',
+    info:'Aluminum gutters last ~20 yrs. Undersized or clogged gutters are a leading cause of foundation and fascia damage — cheap to fix, expensive to ignore.' },
+  { id:'siding',    name:'Siding & exterior paint',  cat:'Roof & Exterior', life:[10,20], cost:'$6k–$15k',
+    info:'Paint cycles run 7–10 yrs; wood siding needs the most upkeep, fiber-cement and vinyl the least. Failing caulk and paint let water into the wall assembly.' },
+  { id:'windows',   name:'Windows',                  cat:'Roof & Exterior', life:[20,30], cost:'$8k–$20k',
+    info:'Vinyl double-panes last 20–30 yrs. Fogged glass means failed seals. Full replacement is a big ticket — price per opening runs $400–$1,000+ installed.' },
+  { id:'wh',        name:'Water heater',             cat:'Plumbing', life:[8,12], cost:'$1.2k–$2.5k',
+    info:'Tank units last 8–12 yrs (tankless ~20). Rust at the base or rumbling sediment noise means it’s near the end. Cheap enough to budget as routine, painful as a surprise.' },
+  { id:'plumbing',  name:'Supply & drain plumbing',  cat:'Plumbing', life:[40,70], cost:'$8k–$20k',
+    info:'Copper and PEX last 50+ yrs. Watch for galvanized steel (corrodes shut, ~40–60 yr life) and polybutylene (uninsurable in some markets) — both often mean a full repipe.' },
+  { id:'sewer',     name:'Sewer line',               cat:'Plumbing', life:[40,60], cost:'$5k–$15k',
+    info:'Clay and cast-iron lines from pre-1980 are root and collapse prone. A $200–$400 camera scope before closing is the best inspection money you can spend on an older house.' },
+  { id:'panel',     name:'Electrical panel & wiring',cat:'Electrical', life:[30,50], cost:'$2k–$5k',
+    info:'Panels last 30–50 yrs. Federal Pacific and Zinsco panels are fire hazards insurers may refuse; knob-and-tube or aluminum branch wiring can mean a rewire well beyond panel cost.' },
+  { id:'foundation',name:'Foundation',               cat:'Structure & Grounds', life:[60,100], cost:'$5k–$25k+',
+    info:'Effectively lifetime if built right, but settling, water intrusion and horizontal cracks need a structural engineer ($400–$700) — repairs range from minor piers to five figures.' },
+  { id:'driveway',  name:'Driveway & flatwork',      cat:'Structure & Grounds', life:[25,35], cost:'$4k–$10k',
+    info:'Concrete lasts 25–35 yrs, asphalt 15–25 with sealing. Mostly cosmetic, but severe cracking and trip hazards show up in appraisals and liability.' },
+  { id:'fence',     name:'Fencing',                  cat:'Structure & Grounds', life:[10,20], cost:'$2k–$6k',
+    info:'Wood fences last 10–20 yrs depending on climate and posts (steel posts outlast wood). Vinyl and chain-link last much longer with little upkeep.' },
+  { id:'appliances',name:'Appliances',               cat:'Interior & Appliances', life:[8,15], cost:'$2k–$6k',
+    info:'Fridge, range, dishwasher, washer/dryer average 8–15 yrs. In rentals expect the shorter end — budget a rotating replacement rather than all at once.' },
+  { id:'flooring',  name:'Flooring',                 cat:'Interior & Appliances', life:[10,25], cost:'$3k–$8k',
+    info:'Carpet in rentals lasts 5–8 yrs; LVP 15–25 and is the rental workhorse. Hardwood lasts decades but needs refinishing every 10–15 yrs.' },
+];
+const CAPEX_CONDITIONS = ['', 'New', 'Good', 'Fair', 'Poor', 'Replace soon'];
+let capexItems = [];   /* nothing tracked until you add items */
+
+const capexMeta = it => CAPEX_TYPES.find(t => t.id === it.type) || null;
+const capexName = it => capexMeta(it)?.name || it.name || '';
+const YEAR_OPTS = '<option value="">Year?</option>' +
+  Array.from({length: 81}, (_, i) => THIS_YEAR - i).map(y => `<option value="${y}">${y}</option>`).join('');
+const TYPE_OPTS = (sel) =>
+  `<option value=""${!sel?' selected':''} disabled>Choose item…</option>` +
+  CAPEX_CATS.map(cat =>
+    `<optgroup label="${cat}">${CAPEX_TYPES.filter(t => t.cat === cat)
+      .map(t => `<option value="${t.id}"${t.id===sel?' selected':''}>${t.name}</option>`).join('')}</optgroup>`
+  ).join('') +
+  `<option value="custom"${sel==='custom'?' selected':''}>Custom item…</option>`;
+
+function capexFlagged(c){
+  if (c.cond === 'Poor' || c.cond === 'Replace soon') return true;
+  const meta = CAPEX_TYPES.find(t => t.id === c.type);
+  const y = parseNum(c.year);
+  return !!(meta && y > 1900 && (THIS_YEAR - y) >= meta.life[1]);
+}
+function updateCapexBadge(){
+  const n = capexItems.filter(capexFlagged).length;
+  const b = $('capexBadge');
+  b.textContent = n ? `${n} ⚠` : '';
+  b.style.display = n ? '' : 'none';
+}
+function renderCapex(){
+  const wrap = $('capexList');
+  wrap.innerHTML = '';
+  if (!capexItems.length){
+    wrap.innerHTML = '<div class="empty-note" style="margin-bottom:8px;">Nothing tracked yet — add the big-ticket systems you inspected (roof, HVAC, water heater…).</div>';
+    updateCapexBadge();
+    return;
+  }
+  /* group items by home section; unchosen first, customs last */
+  const buckets = [['New — choose a type', it => it.type === '']]
+    .concat(CAPEX_CATS.map(cat => [cat, it => capexMeta(it)?.cat === cat]))
+    .concat([['Other / Custom', it => it.type === 'custom']]);
+  buckets.forEach(([label, match]) => {
+    const items = capexItems.filter(match);
+    if (!items.length) return;
+    const head = document.createElement('div');
+    head.className = 'cx-cat';
+    head.textContent = label;
+    wrap.appendChild(head);
+    items.forEach(item => wrap.appendChild(capexRow(item)));
+  });
+  updateCapexBadge();
+}
+function capexRow(item){
+  const meta = capexMeta(item);
+  const el = document.createElement('div');
+  el.className = 'capex-item';
+  el.innerHTML = `
+    <div class="cx-row">
+      <select class="cx-sel cx-type" title="Item">${TYPE_OPTS(item.type)}</select>
+      ${item.type === 'custom' ? `<input class="cx-name-input" type="text" placeholder="Name (e.g. Pool pump)" value="${escapeAttr(item.name)}">` : ''}
+      <select class="cx-sel cx-year" title="Year installed">${YEAR_OPTS}</select>
+      <select class="cx-sel cx-cond" title="Condition">${CAPEX_CONDITIONS.map(c => `<option value="${c}"${c===item.cond?' selected':''}>${c || 'Condition?'}</option>`).join('')}</select>
+      ${meta ? `<span class="cx-info" tabindex="0">i<span class="tip"><b>${meta.name}</b><br>Typical life: ${meta.life[0]}–${meta.life[1]} yrs · Replace: ${meta.cost}<br>${meta.info}</span></span>` : ''}
+      ${meta ? `<span class="cx-cost" title="Estimated replacement cost">${meta.cost}</span>` : ''}
+      <span class="cx-age"></span>
+      <button class="cx-del" title="Remove">✕</button>
+    </div>
+    <input class="cx-notes" type="text" placeholder="Notes (serviced 2024, minor rust, quoted $6k…)" value="${escapeAttr(item.notes)}">`;
+  const typeEl = el.querySelector('.cx-type');
+  const yearEl = el.querySelector('.cx-year');
+  const condEl = el.querySelector('.cx-cond');
+  const ageEl = el.querySelector('.cx-age');
+  yearEl.value = item.year || '';
+  const paint = () => {
+    const y = parseNum(item.year);
+    ageEl.textContent = y > 1900 ? `≈ ${THIS_YEAR - y}y` : '';
+    ageEl.classList.toggle('warn', capexFlagged(item));
+    condEl.style.color = (item.cond === 'Poor' || item.cond === 'Replace soon') ? 'var(--neg)' : '';
+    updateCapexBadge();
+  };
+  typeEl.addEventListener('change', () => {
+    item.type = typeEl.value;
+    if (item.type !== 'custom') item.name = capexName(item);
+    renderCapex(); calc();
+  });
+  yearEl.addEventListener('change', () => { item.year = yearEl.value; paint(); calc(); });
+  condEl.addEventListener('change', () => { item.cond = condEl.value; paint(); calc(); });
+  el.querySelector('.cx-notes').addEventListener('input', ev => { item.notes = ev.target.value; calc(); });
+  const nameEl = el.querySelector('.cx-name-input');
+  if (nameEl) nameEl.addEventListener('input', () => { item.name = nameEl.value; calc(); });
+  el.querySelector('.cx-del').addEventListener('click', () => {
+    capexItems = capexItems.filter(x => x !== item);
+    renderCapex(); calc();
+  });
+  paint();
+  return el;
+}
+$('capexAdd').addEventListener('click', () => {
+  capexItems.push({type:'', name:'', year:'', cond:'', notes:''});
+  renderCapex(); calc();
+  const sels = $('capexList').querySelectorAll('.cx-type');
+  if (sels.length) sels[0].focus();   /* new items group renders first */
+});
+
+/* ---------------- sales & rental comps ---------------- */
+let salesComps = [], rentComps = [];   /* {addr, amt, sqft, beds, baths} */
+
+function compArr(kind){ return kind === 'sales' ? salesComps : rentComps; }
+function renderComps(kind){
+  const wrap = $(kind === 'sales' ? 'salesCompList' : 'rentCompList');
+  wrap.innerHTML = '';
+  compArr(kind).forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'comp-item';
+    row.innerHTML = `
+      <input type="text" placeholder="Address" value="${escapeAttr(item.addr)}">
+      <input class="num" inputmode="decimal" placeholder="${kind==='sales'?'Price':'Rent'}" value="${item.amt? Math.round(item.amt).toLocaleString('en-US'):''}">
+      <input class="num" inputmode="decimal" placeholder="Sqft" value="${item.sqft? Math.round(item.sqft):''}">
+      <input class="num" inputmode="decimal" placeholder="—" value="${escapeAttr(item.beds)}">
+      <input class="num" inputmode="decimal" placeholder="—" value="${escapeAttr(item.baths)}">
+      <span class="psf">—</span>
+      <button class="del" title="Remove">✕</button>`;
+    const [addr, amt, sqft, beds, baths] = row.querySelectorAll('input');
+    const psf = row.querySelector('.psf');
+    const upd = () => {
+      item.addr = addr.value; item.amt = parseNum(amt.value); item.sqft = parseNum(sqft.value);
+      item.beds = beds.value; item.baths = baths.value;
+      psf.textContent = (item.amt>0 && item.sqft>0) ? '$' + (item.amt/item.sqft).toFixed(kind==='sales'?0:2) : '—';
+      calc();
+    };
+    [addr, amt, sqft, beds, baths].forEach(i => i.addEventListener('input', upd));
+    amt.addEventListener('blur', () => { amt.value = item.amt? Math.round(item.amt).toLocaleString('en-US'):''; });
+    psf.textContent = (item.amt>0 && item.sqft>0) ? '$' + (item.amt/item.sqft).toFixed(kind==='sales'?0:2) : '—';
+    row.querySelector('.del').addEventListener('click', () => {
+      if (kind === 'sales') salesComps = salesComps.filter(x => x !== item);
+      else rentComps = rentComps.filter(x => x !== item);
+      renderComps(kind); calc();
+    });
+    wrap.appendChild(row);
+  });
+}
+$('salesCompAdd').addEventListener('click', () => {
+  salesComps.push({addr:'', amt:0, sqft:0, beds:'', baths:''});
+  renderComps('sales'); calc();
+});
+$('rentCompAdd').addEventListener('click', () => {
+  rentComps.push({addr:'', amt:0, sqft:0, beds:'', baths:''});
+  renderComps('rent'); calc();
+});
+$('rcApply').addEventListener('click', () => {
+  const est = parseNum($('rcEst').textContent);
+  if (!est){ toast('Add rental comps with rent and sqft first'); return; }
+  $('rent').value = Math.round(est).toLocaleString('en-US');
+  calc();
+  document.querySelector('.tab[data-pane=analyzer]').click();
+  toast(`Gross rent set to ${money0(est)} from comps`);
+});
+
+function updateCompSummaries(){
+  const subjSqft = parseNum($('prop_sqft').value);
+  /* sales */
+  const sv = salesComps.filter(c => c.amt > 0);
+  const sPsf = sv.filter(c => c.sqft > 0).map(c => c.amt/c.sqft);
+  const avgSPsf = sPsf.length ? sPsf.reduce((a,b)=>a+b,0)/sPsf.length : 0;
+  const sorted = sv.map(c=>c.amt).sort((a,b)=>a-b);
+  const median = sorted.length ? (sorted.length%2 ? sorted[(sorted.length-1)/2] : (sorted[sorted.length/2-1]+sorted[sorted.length/2])/2) : 0;
+  $('scMedian').textContent = median ? money0(median) : '—';
+  $('scAvgPsf').textContent = avgSPsf ? '$' + Math.round(avgSPsf) : '—';
+  $('scArv').textContent = (avgSPsf && subjSqft) ? money0(avgSPsf*subjSqft) : '—';
+  $('scNote').textContent = !sv.length ? 'Add sold comps to estimate what the property is worth.'
+    : !subjSqft ? 'Enter the subject’s sqft in Property details (deal header) to compute an estimated value.'
+    : `${sv.length} comp${sv.length>1?'s':''} · avg $${Math.round(avgSPsf)}/sqft × ${Math.round(subjSqft).toLocaleString('en-US')} sqft`;
+  /* rentals */
+  const rv = rentComps.filter(c => c.amt > 0);
+  const rPsf = rv.filter(c => c.sqft > 0).map(c => c.amt/c.sqft);
+  const avgRPsf = rPsf.length ? rPsf.reduce((a,b)=>a+b,0)/rPsf.length : 0;
+  const avgRent = rv.length ? rv.reduce((a,c)=>a+c.amt,0)/rv.length : 0;
+  $('rcAvg').textContent = avgRent ? money0(avgRent) : '—';
+  $('rcAvgPsf').textContent = avgRPsf ? '$' + avgRPsf.toFixed(2) : '—';
+  $('rcEst').textContent = (avgRPsf && subjSqft) ? money0(avgRPsf*subjSqft) : (avgRent ? money0(avgRent) : '—');
+  $('rcNote').textContent = !rv.length ? 'Add rental comps to estimate market rent.'
+    : (avgRPsf && subjSqft) ? `${rv.length} comp${rv.length>1?'s':''} · $${avgRPsf.toFixed(2)}/sqft × ${Math.round(subjSqft).toLocaleString('en-US')} sqft`
+    : `${rv.length} comp${rv.length>1?'s':''} · using average rent (add sqft for a sharper estimate)`;
+}
+
+/* ---------------- input plumbing ---------------- */
+function fmtInput(el){
+  if (el.dataset.fmt === 'text' || el.value.trim() === '') return;
+  const v = parseNum(el.value);
+  if (el.dataset.fmt === 'money') el.value = Math.round(v).toLocaleString('en-US');
+  else if (el.dataset.fmt === 'raw') el.value = String(v);
+}
+document.querySelectorAll('#pane-analyzer input.num, .deal-head input.num').forEach(el => {
+  el.addEventListener('input', calc);
+  el.addEventListener('blur', () => { fmtInput(el); calc(); });
+});
+document.querySelectorAll('input[type=range]').forEach(el => {
+  el.addEventListener('input', () => { paintSlider(el); calc(); });
+  paintSlider(el);
+});
+['sellerOn','subtoOn','ioOn','armOn'].forEach(id => $(id).addEventListener('change', () => { syncFinSubs(); calc(); }));
+$('arm_freq').addEventListener('change', calc);
+$('utilHead').addEventListener('click', () => {
+  $('utilHead').classList.toggle('open');
+  $('utilBody').classList.toggle('open');
+});
+$('oiHead').addEventListener('click', () => {
+  $('oiHead').classList.toggle('open');
+  $('oiBody').classList.toggle('open');
+});
+$('seller_type').addEventListener('change', calc);
+function syncFinSubs(){
+  $('sellerSub').classList.toggle('on', $('sellerOn').checked);
+  $('subtoSub').classList.toggle('on', $('subtoOn').checked);
+  $('ioSub').classList.toggle('on', $('ioOn').checked);
+  $('armSub').classList.toggle('on', $('armOn').checked);
+}
+function paintSlider(el){
+  const f = (el.value - el.min) / (el.max - el.min) * 100;
+  el.style.setProperty('--fill', f + '%');
+}
+
+/* ---------------- state ---------------- */
+function readState(){
+  const s = {
+    name: getDealName(),
+    price: parseNum($('price').value),
+    downPct: parseNum($('downPct').value),
+    rehab: parseNum($('rehab').value),
+    closing: parseNum($('closing').value),
+    closingUnit,
+    utilUnits: {...utilUnits},
+    rate: parseNum($('rate').value),
+    term: parseNum($('term').value),
+    ioOn: $('ioOn').checked,
+    ioYears: parseNum($('io_years').value),
+    armOn: $('armOn').checked,
+    armFixed: parseNum($('arm_fixed').value),
+    armFreq: parseNum($('arm_freq').value),
+    armRate: parseNum($('arm_rate').value),
+    sellerOn: $('sellerOn').checked,
+    sellerAmt: parseNum($('seller_amt').value),
+    sellerRate: parseNum($('seller_rate').value),
+    sellerTerm: parseNum($('seller_term').value),
+    sellerType: $('seller_type').value,
+    subtoOn: $('subtoOn').checked,
+    subtoBal: parseNum($('subto_bal').value),
+    subtoRate: parseNum($('subto_rate').value),
+    subtoTerm: parseNum($('subto_term').value),
+    rent: parseNum($('rent').value),
+    vacancy: parseNum($('vacancy').value),
+    rentGrowth: parseNum($('rentGrowth').value),
+    expGrowth: parseNum($('expGrowth').value),
+    appr: parseNum($('appr').value),
+    sellCost: parseNum($('sellCost').value),
+    expenses: {}, units: {...expUnits},
+    otherInc: {}, utils: {},
+    sow: sowItems.map(i => ({sec:i.sec, desc:i.desc, cost:i.cost})),
+    salesComps: salesComps.map(c => ({...c})),
+    rentComps: rentComps.map(c => ({...c})),
+    capex: capexItems.map(c => ({type:c.type, name:capexName(c), year:c.year, cond:c.cond, notes:c.notes})),
+    hood: {
+      crime: $('hood_crime').value,
+      schools: $('hood_schools').value.trim(),
+      notes: $('hood_notes').value,
+    },
+    prop: {
+      address: $('propAddress').value.trim(),
+      beds: $('prop_beds').value.trim(),
+      baths: $('prop_baths').value.trim(),
+      sqft: $('prop_sqft').value.trim(),
+      year: $('prop_year').value.trim(),
+      list: parseNum($('prop_list').value),
+      video: $('videoUrl').value.trim(),
+      urls: otherUrls.map(u => ({label:u.label, url:u.url})),
+    },
+  };
+  EXPENSES.forEach(e => s.expenses[e.id] = parseNum($('exp_'+e.id).value));
+  OTHER_INC.forEach(k => s.otherInc[k] = parseNum($('oi_'+k).value));
+  UTILS.forEach(k => s.utils[k] = parseNum($('ut_'+k).value));
+  return s;
+}
+
+function monthlyPI(loan, ratePct, years){
+  if (loan <= 0 || years <= 0) return 0;
+  const r = ratePct/100/12, n = years*12;
+  if (r === 0) return loan/n;
+  return loan * r / (1 - Math.pow(1+r, -n));
+}
+function loanBalance(loan, ratePct, years, monthsPaid){
+  if (loan <= 0) return 0;
+  const r = ratePct/100/12, n = years*12, m = Math.min(monthsPaid, n);
+  if (r === 0) return loan * (1 - m/n);
+  const pay = monthlyPI(loan, ratePct, years);
+  return Math.max(0, loan*Math.pow(1+r,m) - pay*(Math.pow(1+r,m)-1)/r);
+}
+
+/* ---------------- pure computation ---------------- */
+function compute(s){
+  const downAmt = s.price * s.downPct/100;
+  const sellerAmt = s.sellerOn ? s.sellerAmt : 0;
+  const subtoBal = s.subtoOn ? s.subtoBal : 0;
+  const financedOther = sellerAmt + subtoBal;
+  const newLoan = Math.max(0, s.price - downAmt - financedOther);
+  const overBy = (downAmt + financedOther) - s.price;
+
+  /* bank-loan schedule: supports an interest-only period and an ARM adjustment */
+  const termM = Math.round(s.term*12);
+  const ioEndM = s.ioOn ? Math.round(Math.min((s.ioYears > 0 ? s.ioYears : s.term), s.term)*12) : 0;
+  const armStartM = s.armOn ? Math.min(Math.round((s.armFixed || 0)*12), termM) : Infinity;
+  const bank = (() => {
+    const res = { pay1: 0, payAfterArm: 0, payAfterIO: 0, yearDebt: [0,0,0,0,0], balYear: [0,0,0,0,0] };
+    if (newLoan <= 0) return res;
+    let bal = newLoan, pay = 0;
+    const end = Math.min(termM, 60);
+    for (let m = 1; m <= end; m++){
+      const annual = (s.armOn && m > armStartM) ? s.armRate : s.rate;
+      const rm = annual/100/12;
+      const isIO = m <= ioEndM;
+      if (isIO) pay = bal * rm;
+      else if (m === 1 || m === ioEndM + 1 || m === armStartM + 1)
+        pay = monthlyPI(bal, annual, (termM - m + 1)/12);
+      if (m === 1) res.pay1 = pay;
+      if (m === armStartM + 1) res.payAfterArm = pay;
+      if (ioEndM > 0 && m === ioEndM + 1) res.payAfterIO = pay;
+      const interest = bal * rm;
+      const principal = isIO ? 0 : Math.min(bal, pay - interest);
+      bal -= principal;
+      res.yearDebt[Math.ceil(m/12) - 1] += pay;
+      if (m % 12 === 0) res.balYear[m/12 - 1] = bal;
+    }
+    return res;
+  })();
+  const piBank = bank.pay1;
+  const piSeller = !s.sellerOn ? 0 :
+    (s.sellerType === 'io' ? sellerAmt * s.sellerRate/100/12 : monthlyPI(sellerAmt, s.sellerRate, s.sellerTerm));
+  const piSub = s.subtoOn ? monthlyPI(subtoBal, s.subtoRate, s.subtoTerm) : 0;
+  const pi = piBank + piSeller + piSub;
+
+  const closingAmt = (s.closingUnit === '%') ? s.price * (s.closing||0)/100 : (s.closing||0);
+  const cashInvested = downAmt + s.rehab + closingAmt;
+
+  const otherIncTotal = OTHER_INC.reduce((t,k)=> t + (s.otherInc[k]||0), 0);
+  const utilTotal = UTILS.reduce((t,k)=> {
+    const v = s.utils[k]||0;
+    return t + (s.utilUnits?.[k] === 'yr' ? v/12 : v);
+  }, 0);
+
+  const gross = s.rent + otherIncTotal;
+  const vacLoss = s.rent * s.vacancy/100;
+  const effIncome = gross - vacLoss;
+
+  const expLines = EXPENSES.map(e => ({
+    ...e, unit: s.units[e.id], raw: s.expenses[e.id]||0,
+    monthly: expMonthly(s.units[e.id], s.expenses[e.id]||0, s.rent),
+  }));
+  const opEx = expLines.reduce((t,e)=> t + e.monthly, 0) + utilTotal;
+  const noi = effIncome - opEx;
+  const cashFlow = noi - pi;
+  const annualCF = cashFlow*12;
+  const coc = cashInvested>0 ? annualCF/cashInvested*100 : NaN;
+  const dscr = pi>0 ? (noi/pi) : NaN;
+
+  const basis = s.price + s.rehab;
+  const onePct = basis>0 ? s.rent/basis*100 : 0;
+  const grm = s.rent>0 ? s.price/(s.rent*12) : NaN;
+
+  /* balances across all three notes at m months (m is always a year boundary) */
+  const balancesAt = m => {
+    const bankBal = newLoan > 0 ? bank.balYear[m/12 - 1] : 0;
+    const seller = !s.sellerOn ? 0 :
+      (s.sellerType === 'io' ? sellerAmt : loanBalance(sellerAmt, s.sellerRate, s.sellerTerm, m));
+    const sub = s.subtoOn ? loanBalance(subtoBal, s.subtoRate, s.subtoTerm, m) : 0;
+    return bankBal + seller + sub;
+  };
+
+  const years = [];
+  let cumCF = 0;
+  for (let y=1; y<=5; y++){
+    const g = Math.pow(1+s.rentGrowth/100, y-1);
+    const eg = Math.pow(1+s.expGrowth/100, y-1);
+    const yRent = s.rent*12*g, yOther = otherIncTotal*12*g;
+    const yVac = yRent*s.vacancy/100;
+    const yEff = yRent + yOther - yVac;
+    const yOpEx = expLines.reduce((t,e)=> {
+      if (e.unit === '%') return t + yRent*e.raw/100;
+      if (e.unit === 'yr') return t + e.raw*eg;
+      return t + e.raw*12*eg;
+    }, 0) + utilTotal*12*eg;
+    const yNOI = yEff - yOpEx;
+    const yDebt = bank.yearDebt[y-1] + (piSeller + piSub)*12;
+    const yCF = yNOI - yDebt;
+    cumCF += yCF;
+    const value = s.price * Math.pow(1+s.appr/100, y);
+    const bal = balancesAt(y*12);
+    years.push({ y, yRent, yOther, yVac, yEff, yOpEx, yNOI, yDebt, yCF, cumCF, value, bal, equity:value-bal });
+  }
+  const y5 = years[4];
+  const netSale = y5.value * (1 - s.sellCost/100);
+  const proceeds = netSale - y5.bal;
+  const totalProfit = proceeds + y5.cumCF - cashInvested;
+  const roi5 = cashInvested>0 ? totalProfit/cashInvested*100 : NaN;
+  const annualized = cashInvested>0 && (totalProfit+cashInvested)>0
+    ? (Math.pow((totalProfit+cashInvested)/cashInvested, 1/5)-1)*100 : NaN;
+
+  return { downAmt, sellerAmt, subtoBal, newLoan, overBy, piBank, piSeller, piSub, pi,
+    payAfterArm: bank.payAfterArm, payAfterIO: bank.payAfterIO,
+    closingAmt, cashInvested, otherIncTotal, utilTotal, gross, vacLoss, effIncome, expLines, opEx,
+    noi, cashFlow, annualCF, coc, dscr, onePct, grm, years, netSale, proceeds, totalProfit, roi5, annualized };
+}
+
+function calc(){
+  const s = readState();
+  const r = compute(s);
+  render(s, r);
+  try { localStorage.setItem(draftKey(), JSON.stringify(s)); } catch {}
+}
+
+/* ---------------- render ---------------- */
+function render(s, r){
+  $('downOut').textContent = `${s.downPct}% · ${money0(r.downAmt)}`;
+  $('armLabel').textContent = `${+s.armFixed}/${s.armFreq === 6 ? 6 : 1} ARM`;
+  $('vacancyOut').textContent = stripZeros(pct(s.vacancy,1));
+  $('rentGrowthOut').textContent = stripZeros(pct(s.rentGrowth,2));
+  $('expGrowthOut').textContent = stripZeros(pct(s.expGrowth,2));
+  $('apprOut').textContent = stripZeros(pct(s.appr,2));
+  $('sellCostOut').textContent = stripZeros(pct(s.sellCost,1));
+  $('exitCostNote').textContent = stripZeros(pct(s.sellCost,1));
+  $('otherIncSum').textContent = money0(r.otherIncTotal) + '/mo';
+  $('utilSum').textContent = money0(r.utilTotal) + '/mo';
+  $('utilMonthlyTotal').textContent = money0(r.utilTotal) + '/mo';
+  $('closingSub').textContent = s.closingUnit === '%' ? `= ${money0(r.closingAmt)}` : '';
+  $('creativeSum').textContent = (s.sellerOn || s.subtoOn) ? money0(r.sellerAmt + r.subtoBal) + ' carried' : 'off';
+  renderPropChips(s);
+  updateCompSummaries();
+  renderHoodLinks(s);
+
+  /* financing summary — the stack must equal the purchase price */
+  const fs = $('finSummary');
+  const parts = [
+    ['Down payment', r.downAmt],
+    s.subtoOn ? ['Subject-to mortgage', r.subtoBal] : null,
+    s.sellerOn ? ['Seller financing', r.sellerAmt] : null,
+    ['New loan (bank)', r.newLoan],
+  ].filter(Boolean);
+  const piParts = [
+    r.piBank>0 ? [`New loan ${s.ioOn?'(interest-only)':'P&I'}`, r.piBank] : null,
+    r.piSeller>0 ? [`Seller ${s.sellerType==='io'?'(interest-only)':'P&I'}`, r.piSeller] : null,
+    r.piSub>0 ? ['Subject-to P&I', r.piSub] : null,
+  ].filter(Boolean);
+  fs.innerHTML =
+    parts.map(([l,v]) => `<div class="row"><label>${l}</label><span class="val">${money0(v)}</span></div>`).join('') +
+    `<div class="row total"><label>Total = purchase price</label><span class="val ${r.overBy<=0?'fin-ok':''}">${money0(r.downAmt+r.subtoBal+r.sellerAmt+r.newLoan)}${r.overBy<=0?' ✓':''}</span></div>` +
+    `<div class="row debt-total"><label>Total monthly debt service</label><span class="val">${money0(r.pi)}/mo</span></div>` +
+    (piParts.length>1 ? piParts.map(([l,v]) => `<div class="row"><label style="padding-left:10px">↳ ${l}</label><span class="val">${money0(v)}</span></div>`).join('') : '') +
+    (s.armOn && r.payAfterArm > 0 ? `<div class="row"><label style="padding-left:10px; color:var(--warn);">↳ ${+s.armFixed}/${s.armFreq===6?6:1} ARM — adjusts in year ${Math.floor(s.armFixed)+1}</label><span class="val" style="color:var(--warn);">≈ ${money0(r.payAfterArm + r.piSeller + r.piSub)}/mo</span></div>` : '') +
+    (s.ioOn && s.ioYears > 0 && s.ioYears < s.term && r.payAfterIO > 0 ? `<div class="row"><label style="padding-left:10px; color:var(--warn);">↳ IO ends year ${+s.ioYears} — payment steps up</label><span class="val" style="color:var(--warn);">≈ ${money0(r.payAfterIO + r.piSeller + r.piSub)}/mo</span></div>` : '');
+  const warn = $('finWarn');
+  if (r.overBy > 0){
+    warn.textContent = `Financing exceeds the purchase price by ${money0(r.overBy)}. Reduce the down payment, seller carry, or subject-to balance.`;
+    warn.classList.add('show');
+  } else warn.classList.remove('show');
+
+  const cocEl = $('cocOut');
+  cocEl.textContent = isFinite(r.coc)? pct(r.coc,1) : '—';
+  cocEl.className = 't-value ' + (r.coc>=0?'pos':'neg');
+  const cfEl = $('cfOut');
+  cfEl.textContent = money(r.cashFlow);
+  cfEl.className = 't-value ' + (r.cashFlow>=0?'pos':'neg');
+  cfEl.parentElement.className = 'tile' + (r.cashFlow<0?' negative':'');
+  $('dscrOut').textContent = isFinite(r.dscr)? r.dscr.toFixed(2) : '∞';
+  $('dscrOut').className = 't-value ' + (r.dscr>=1.25||!isFinite(r.dscr)?'pos': r.dscr>=1?'':'neg');
+  $('roi5Out').textContent = isFinite(r.roi5)? pct(r.roi5,0) : '—';
+  $('roi5Out').className = 't-value ' + (r.roi5>=0?'pos':'neg');
+
+  setCheck('rule1', r.onePct >= 1, 'rule1Val', pct(r.onePct,2));
+  setCheck('grmCheck', r.grm <= 12, 'grmVal', isFinite(r.grm)? r.grm.toFixed(1)+'×':'—');
+  $('cashCheck').className = 'check pass';
+  $('cashCheck').querySelector('.mark').textContent = '$';
+  $('cashVal').textContent = money0(r.cashInvested);
+
+  /* verdict */
+  const v = $('verdict');
+  let cls, title, sub;
+  if (r.cashFlow >= 0 && r.coc >= 8) {
+    cls='good'; title='Strong deal by your numbers';
+    sub=`${pct(r.coc,1)} cash-on-cash with ${money(r.cashFlow)}/mo cash flow — above the common 8% CoC target.`;
+  } else if (r.cashFlow >= 0 && r.coc >= 4) {
+    cls='ok'; title='Workable, but negotiate';
+    sub=`Positive cash flow but ${pct(r.coc,1)} CoC is modest. A lower price or higher rent moves this to strong.`;
+  } else if (r.cashFlow >= 0) {
+    cls='ok'; title='Thin margins';
+    sub=`Cash flow is barely positive and CoC is ${isFinite(r.coc)?pct(r.coc,1):'—'}. Little cushion for surprises.`;
+  } else {
+    cls='bad'; title='Negative cash flow — walk or renegotiate';
+    sub=`This deal loses ${money0(r.cashFlow)} every month at these assumptions.`;
+  }
+  v.className = 'verdict ' + cls;
+  $('verdictTitle').textContent = title;
+  $('verdictSub').textContent = sub;
+
+  /* combined statement computed rows */
+  $('vacLbl').textContent = `Vacancy (${s.vacancy}%)`;
+  $('vacVal').textContent = '−' + money0(r.vacLoss);
+  $('effIncVal').textContent = money(r.effIncome);
+  r.expLines.forEach(e => {
+    const h = $('hint_'+e.id);
+    if (h) h.textContent = ((e.unit==='%' || e.unit==='yr') && e.monthly) ? `= ${money0(e.monthly)}/mo` : '';
+  });
+  $('opExVal').textContent = '−' + money0(r.opEx);
+  $('noiVal').textContent = money(r.noi);
+  const debtRows = [
+    r.piBank>0 ? [`New loan ${s.ioOn?'(interest-only)':'P&I'}`, r.piBank] : null,
+    r.piSeller>0 ? [`Seller financing ${s.sellerType==='io'?'(interest-only)':''}`, r.piSeller] : null,
+    r.piSub>0 ? ['Subject-to payment', r.piSub] : null,
+  ].filter(Boolean);
+  $('debtRowsBox').innerHTML = debtRows.length
+    ? debtRows.map(([l,v]) => `<div class="row comp"><label>${l}</label><span class="comp-val amt-neg">−${money0(v)}</span></div>`).join('')
+    : '<div class="row comp"><label>No financing</label><span class="comp-val">$0</span></div>';
+  const cfv = $('cfTotalVal');
+  cfv.textContent = money(r.cashFlow);
+  cfv.className = 'comp-val ' + (r.cashFlow>=0?'amt-pos':'amt-neg');
+
+  /* pro-forma */
+  const pf = $('pfTable');
+  const cols = r.years;
+  const row = (label, fn, opts={}) =>
+    `<tr class="${opts.cls||''}"><td>${label}</td>${cols.map(y=>{
+      const val = fn(y);
+      const neg = (typeof val==='number' && val<0) ? ' class="amt-neg"' : '';
+      return `<td${neg}>${money(val)}</td>`;
+    }).join('')}</tr>`;
+  pf.innerHTML = `
+    <thead><tr><th></th>${cols.map(y=>`<th>Year ${y.y}</th>`).join('')}</tr></thead>
+    <tbody>
+      <tr class="section"><td colspan="6">Operations</td></tr>
+      ${row('Gross rent', y=>y.yRent)}
+      ${row('Vacancy loss', y=>-y.yVac)}
+      ${row('Operating expenses', y=>-y.yOpEx)}
+      ${row('NOI', y=>y.yNOI, {cls:'strong'})}
+      ${row('Debt service', y=>-y.yDebt)}
+      ${row('Cash flow', y=>y.yCF, {cls:'strong'})}
+      ${row('Cumulative cash flow', y=>y.cumCF)}
+      <tr class="section"><td colspan="6">Equity</td></tr>
+      ${row('Property value', y=>y.value)}
+      ${row('Total loan balances', y=>y.bal)}
+      ${row('Equity', y=>y.equity, {cls:'strong'})}
+    </tbody>`;
+
+  /* exit */
+  $('exitProceeds').textContent = money(r.proceeds);
+  $('exitProfit').textContent = money(r.totalProfit);
+  $('exitProfit').style.color = r.totalProfit>=0? 'var(--accent-strong)':'var(--neg)';
+  $('exitIrr').textContent = isFinite(r.annualized)? pct(r.annualized,1):'—';
+}
+
+function setCheck(id, pass, valId, valText){
+  const el = $(id);
+  el.className = 'check ' + (pass?'pass':'fail');
+  el.querySelector('.mark').textContent = pass?'✓':'✗';
+  $(valId).textContent = valText;
+}
+
+/* ---------------- saved deals ---------------- */
+function getDeals(){ try { return JSON.parse(localStorage.getItem(storeKey())) || []; } catch { return []; } }
+function setDeals(d){ localStorage.setItem(storeKey(), JSON.stringify(d)); }
+
+$('saveBtn').addEventListener('click', () => {
+  const s = readState();
+  if (!s.name) {
+    document.querySelector('.tab[data-pane=analyzer]').click();
+    $('dealName').focus();
+    toast('Give the deal a name first — tap the title to edit it');
+    return;
+  }
+  const deals = getDeals();
+  const i = deals.findIndex(d => d.name === s.name);
+  s.savedAt = new Date().toISOString();
+  if (i >= 0) deals[i] = s; else deals.push(s);
+  setDeals(deals);
+  renderSaved();
+  toast(i>=0 ? 'Deal updated' : 'Deal saved');
+});
+$('resetBtn').addEventListener('click', () => {
+  if (!confirm('Reset all inputs to defaults? Saved deals are kept.')) return;
+  localStorage.removeItem(draftKey());
+  sessionStorage.setItem('rentalCalc.reset','1');
+  location.reload();
+});
+
+/* hard reset to the HTML defaults — beats any browser form restoration */
+function applyDefaults(){
+  setDealName('');
+  document.querySelectorAll('input').forEach(el => {
+    if (el.type === 'checkbox') el.checked = el.defaultChecked;
+    else el.value = el.defaultValue;
+  });
+  document.querySelectorAll('select').forEach(el => { el.value = el.querySelector('option').value; });
+  EXPENSES.forEach(e => setUnit(e.id, e.unit));
+  setClosingUnit('$');
+  UTILS.forEach(k => setUtilUnit(k, 'mo'));
+  document.querySelectorAll('input[type=range]').forEach(paintSlider);
+  syncFinSubs();
+  otherUrls = [];
+  renderUrls();
+  salesComps = []; rentComps = [];
+  renderComps('sales'); renderComps('rent');
+  capexItems = [];
+  renderCapex();
+  $('hood_notes').value = '';
+  sowItems = [];
+  sowRender();
+  sowSync();
+}
+
+function setSlider(id, val){ const el = $(id); el.value = val; paintSlider(el); }
+
+function loadDeal(d){
+  applyState(d);
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function applyState(d){
+  setDealName(d.name);
+  $('price').value = Math.round(d.price).toLocaleString('en-US');
+  setClosingUnit(d.closingUnit || '$');
+  $('closing').value = (d.closingUnit === '%') ? String(d.closing) : Math.round(d.closing);
+  setSlider('downPct', d.downPct);
+  $('rate').value = d.rate;
+  $('term').value = d.term;
+  $('rent').value = Math.round(d.rent).toLocaleString('en-US');
+  setSlider('vacancy', d.vacancy);
+  setSlider('rentGrowth', d.rentGrowth); setSlider('expGrowth', d.expGrowth);
+  setSlider('appr', d.appr); setSlider('sellCost', d.sellCost);
+  $('ioOn').checked = !!d.ioOn;
+  $('io_years').value = d.ioYears ?? 10;
+  $('armOn').checked = !!d.armOn;
+  $('arm_fixed').value = d.armFixed ?? 7;
+  $('arm_freq').value = d.armFreq ?? 6;
+  $('arm_rate').value = d.armRate ?? 8.5;
+  $('sellerOn').checked = !!d.sellerOn;
+  $('seller_amt').value = Math.round(d.sellerAmt||0).toLocaleString('en-US');
+  $('seller_rate').value = d.sellerRate ?? 6;
+  $('seller_term').value = d.sellerTerm ?? 30;
+  $('seller_type').value = d.sellerType || 'am';
+  $('subtoOn').checked = !!d.subtoOn;
+  $('subto_bal').value = Math.round(d.subtoBal||0).toLocaleString('en-US');
+  $('subto_rate').value = d.subtoRate ?? 4;
+  $('subto_term').value = d.subtoTerm ?? 26;
+  $('creativeCollapse').open = !!(d.sellerOn || d.subtoOn);
+  syncFinSubs();
+  EXPENSES.forEach(e => {
+    $('exp_'+e.id).value = d.expenses?.[e.id] ?? 0;
+    const fallback = e.mode==='time' ? 'mo' : '$';
+    expUnits[e.id] = d.units?.[e.id] || fallback;
+    const t = document.querySelector(`.unit-toggle[data-exp="${e.id}"]`);
+    t.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.u === expUnits[e.id]));
+  });
+  OTHER_INC.forEach(k => $('oi_'+k).value = Math.round(d.otherInc?.[k] ?? 0).toLocaleString('en-US'));
+  UTILS.forEach(k => {
+    $('ut_'+k).value = Math.round(d.utils?.[k] ?? 0);
+    setUtilUnit(k, d.utilUnits?.[k] || 'mo');
+  });
+  $('propAddress').value = d.prop?.address || '';
+  $('prop_beds').value = d.prop?.beds || '';
+  $('prop_baths').value = d.prop?.baths || '';
+  $('prop_sqft').value = d.prop?.sqft || '';
+  $('prop_year').value = d.prop?.year || '';
+  $('prop_list').value = d.prop?.list ? Math.round(d.prop.list).toLocaleString('en-US') : '';
+  $('videoUrl').value = d.prop?.video || '';
+  otherUrls = (d.prop?.urls || []).map(u => ({label: u.label || '', url: u.url || ''}));
+  renderUrls();
+  salesComps = (d.salesComps || []).map(c => ({addr:c.addr||'', amt:c.amt||0, sqft:c.sqft||0, beds:c.beds||'', baths:c.baths||''}));
+  rentComps = (d.rentComps || []).map(c => ({addr:c.addr||'', amt:c.amt||0, sqft:c.sqft||0, beds:c.beds||'', baths:c.baths||''}));
+  renderComps('sales'); renderComps('rent');
+  const LEGACY_CAPEX = {
+    'AC condenser':'ac', 'Evaporator coils':'coils', 'Furnace / heating':'furnace',
+    'Water heater':'wh', 'Roof':'roof', 'Foundation':'foundation',
+    'Plumbing (supply & drains)':'plumbing', 'Sewer line':'sewer',
+    'Electrical panel & wiring':'panel', 'Windows':'windows',
+    'Siding & exterior paint':'siding', 'Gutters':'gutters',
+    'Driveway & flatwork':'driveway', 'Fencing':'fence', 'Appliances':'appliances',
+  };
+  capexItems = (Array.isArray(d.capex) ? d.capex : []).flatMap(c => {
+    const isNewFormat = Object.prototype.hasOwnProperty.call(c, 'type');
+    const hasData = String(c.year || '').trim() || c.cond || (c.notes || '').trim();
+    if (!isNewFormat && !hasData) return [];   /* old default rows that were never filled in */
+    const type = isNewFormat ? (c.type || '') : (LEGACY_CAPEX[c.name] || 'custom');
+    return [{ type, name: c.name || '', year: String(c.year || ''), cond: c.cond || '', notes: c.notes || '' }];
+  });
+  renderCapex();
+  $('hood_crime').value = d.hood?.crime || '';
+  $('hood_schools').value = d.hood?.schools || '';
+  $('hood_notes').value = d.hood?.notes || '';
+  sowItems = (d.sow || []).map(i => ({sec: i.sec || 'other', desc: i.desc || '', cost: i.cost || 0}));
+  sowRender();
+  if (!sowItems.length) $('rehab').value = Math.round(d.rehab).toLocaleString('en-US');
+  sowSync();
+}
+
+function closeDealMenu(){ $('dealMenu').classList.remove('open'); }
+
+function renderSaved(){
+  const deals = getDeals();
+  const menu = $('dealMenu');
+  menu.innerHTML = '';
+  const newItem = document.createElement('div');
+  newItem.className = 'dm-item new';
+  newItem.textContent = '＋ New deal';
+  newItem.addEventListener('click', () => {
+    localStorage.removeItem(draftKey());
+    applyDefaults();
+    closeDealMenu();
+    toast('Fresh sheet — name it and start underwriting');
+  });
+  menu.appendChild(newItem);
+  if (!deals.length){
+    const e = document.createElement('div');
+    e.className = 'dm-empty';
+    e.textContent = 'No saved deals yet — hit “Save deal” to keep one here.';
+    menu.appendChild(e);
+    return;
+  }
+  deals.sort((a,b)=> (b.savedAt||'').localeCompare(a.savedAt||'')).forEach(d => {
+    const r = compute(d);
+    const item = document.createElement('div');
+    item.className = 'dm-item';
+    item.innerHTML = `
+      <div>
+        <div class="dm-n">${escapeHtml(d.name)}</div>
+        <div class="dm-m">${money0(d.price)} · ${money(r.cashFlow)}/mo · ${isFinite(r.coc)? r.coc.toFixed(1):'—'}% CoC</div>
+      </div>
+      <button class="dm-del" title="Delete">✕</button>`;
+    item.addEventListener('click', ev => {
+      if (ev.target.closest('.dm-del')) return;
+      loadDeal(d);
+      closeDealMenu();
+    });
+    item.querySelector('.dm-del').addEventListener('click', () => {
+      if (!confirm(`Delete "${d.name}"?`)) return;
+      setDeals(getDeals().filter(x => x.name !== d.name));
+      renderSaved();
+      $('dealMenu').classList.add('open');   /* keep the menu open after deleting */
+    });
+    menu.appendChild(item);
+  });
+}
+
+$('dealSwitch').addEventListener('click', ev => {
+  ev.stopPropagation();
+  renderSaved();               /* refresh metrics before showing */
+  $('dealMenu').classList.toggle('open');
+});
+document.addEventListener('click', ev => {
+  if (!document.contains(ev.target)) return;   /* node removed mid-click (e.g. deleting a deal) */
+  if (!ev.target.closest('.deal-title-wrap')) closeDealMenu();
+});
+function escapeHtml(str){ const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+function escapeAttr(str){ return String(str||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+let toastTimer;
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=> t.classList.remove('show'), 2400);
+}
+
+/* ---------------- voice fill ---------------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recog = null, listening = false, voiceFinal = '', voiceCancelled = false;
+
+function clampSet(id, v){
+  const el = $(id);
+  const cv = Math.min(+el.max, Math.max(+el.min, v));
+  el.value = cv; paintSlider(el);
+  return cv;
+}
+function setUnit(id, u){
+  expUnits[id] = u;
+  const t = document.querySelector(`.unit-toggle[data-exp="${id}"]`);
+  if (t) t.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.u === u));
+}
+function setMoneyInput(id, v){ $(id).value = Math.round(v).toLocaleString('en-US'); }
+
+/* expense setters */
+const timeExp = (id) => (n) => {
+  const unit = n.annual ? 'yr' : (n.monthly ? 'mo' : expUnits[id]);
+  setUnit(id, unit);
+  $('exp_'+id).value = Math.round(n.v);
+  return `${money0(n.v)}${unit==='yr'?'/yr':'/mo'}`;
+};
+const rentExp = (id) => (n) => {
+  const unit = n.pct ? '%' : '$';
+  setUnit(id, unit);
+  $('exp_'+id).value = n.pct ? n.v : Math.round(n.v);
+  return n.pct ? `${n.v}% of rent` : `${money0(n.v)}/mo`;
+};
+const utilSet = (id) => (n) => {
+  const unit = n.annual ? 'yr' : 'mo';
+  setUtilUnit(id, unit);
+  $('ut_'+id).value = Math.round(n.v);
+  return `${money0(n.v)}${unit==='yr'?'/yr':'/mo'}`;
+};
+const oiSet = (id) => (n) => { setMoneyInput('oi_'+id, n.v); return `${money0(n.v)}/mo`; };
+
+/* ordered — more specific phrases first */
+const VOICE_FIELDS = [
+  { label:'Purchase price', re:/purchase price|asking price|sale price|\bprice\b/,
+    apply:n => { setMoneyInput('price', n.v); return money0(n.v); } },
+  { label:'Down payment', re:/down payment|\bdown\b/,
+    apply:n => {
+      if (n.pct) return clampSet('downPct', Math.round(n.v)) + '%';
+      const price = parseNum($('price').value);
+      if (price <= 0) return null;
+      const p = clampSet('downPct', Math.round(n.v/price*100));
+      return `${money0(n.v)} (${p}%)`;
+    } },
+  { label:'Rehab budget', re:/rehab|renovation/,
+    apply:n => {
+      if ($('rehab').hasAttribute('readonly')) return 'skipped — locked to Scope of Work';
+      setMoneyInput('rehab', n.v); return money0(n.v);
+    } },
+  { label:'Closing costs', re:/closing/,
+    apply:n => {
+      if (n.pct){ setClosingUnit('%'); $('closing').value = n.v; return n.v + '% of price'; }
+      setClosingUnit('$'); $('closing').value = Math.round(n.v); return money0(n.v);
+    } },
+  { label:'Interest rate', re:/interest(?:\s+rate)?/,
+    apply:n => { $('rate').value = n.v; return n.v + '%'; } },
+  { label:'Loan term', re:/loan term|amortization|\bterm\b/,
+    apply:n => { $('term').value = Math.round(n.v); return Math.round(n.v) + ' yrs'; } },
+  { label:'Vacancy', re:/vacancy/,
+    apply:n => clampSet('vacancy', n.v) + '%' },
+  { label:'Rent growth', re:/rent (?:growth|increase)/,
+    apply:n => clampSet('rentGrowth', n.v) + '%/yr' },
+  { label:'Expense growth', re:/expense (?:growth|inflation)/,
+    apply:n => clampSet('expGrowth', n.v) + '%/yr' },
+  { label:'Appreciation', re:/appreciation/,
+    apply:n => clampSet('appr', n.v) + '%/yr' },
+  { label:'Selling costs', re:/selling costs?/,
+    apply:n => clampSet('sellCost', n.v) + '%' },
+  { label:'Pet rent', re:/pet (?:rent|fees?)/, apply:oiSet('pet') },
+  { label:'Laundry income', re:/laundry/, apply:oiSet('laundry') },
+  { label:'Parking income', re:/parking/, apply:oiSet('parking') },
+  { label:'Storage income', re:/storage/, apply:oiSet('storage') },
+  { label:'Other income', re:/other income/, apply:oiSet('other') },
+  { label:'Gross monthly rent', re:/(?<!pet )(?:gross |monthly )?rents?\b(?!\s*(?:growth|increase))/,
+    apply:n => { setMoneyInput('rent', n.v); return money0(n.v) + '/mo'; } },
+  { label:'Property tax', re:/(?:property )?tax(?:es)?/, apply:timeExp('tax') },
+  { label:'Insurance', re:/insurance/, apply:timeExp('ins') },
+  { label:'HOA', re:/\bhoa\b|h\.?o\.?a\.?/, apply:timeExp('hoa') },
+  { label:'Property management', re:/management/, apply:rentExp('mgmt') },
+  { label:'Maintenance', re:/maintenance/, apply:rentExp('maint') },
+  { label:'CapEx reserve', re:/cap ?ex|capital expend\w*/, apply:rentExp('capex') },
+  { label:'Landscaping', re:/landscap\w*/, apply:rentExp('landscape') },
+  { label:'Cleaning', re:/cleaning/, apply:rentExp('cleaning') },
+  { label:'Pest control', re:/pest/, apply:rentExp('pest') },
+  { label:'Miscellaneous', re:/miscellaneous|misc\b/, apply:rentExp('misc') },
+  { label:'Electricity', re:/electric\w*/, apply:utilSet('electric') },
+  { label:'Water', re:/water/, apply:utilSet('water') },
+  { label:'Sewer', re:/sewer/, apply:utilSet('sewer') },
+  { label:'Trash', re:/trash|garbage/, apply:utilSet('trash') },
+  { label:'Gas', re:/\bgas\b/, apply:utilSet('gas') },
+  { label:'Internet', re:/internet|wi-?fi/, apply:utilSet('internet') },
+];
+
+function grabNum(text, fromIdx){
+  const win = text.slice(fromIdx, fromIdx+52);
+  const m = win.match(/\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(thousand|grand|million|mil\b|k\b)?/);
+  if (!m) return null;
+  let v = parseFloat(m[1].replace(/,/g,''));
+  if (m[2]) v *= /million|mil/.test(m[2]) ? 1e6 : 1e3;
+  const tail = win.slice(m.index + m[0].length, m.index + m[0].length + 26);
+  return {
+    v,
+    pct: /^\s*(?:percent|%)/.test(tail),
+    annual: /(?:\b(?:a|per)\s+year\b|annually|yearly)/.test(tail),
+    monthly: /(?:\b(?:a|per)\s+month\b|monthly)/.test(tail),
+  };
+}
+
+function parseVoice(text){
+  const t = ' ' + text.toLowerCase() + ' ';
+  const applied = [];
+  for (const f of VOICE_FIELDS){
+    const m = t.match(f.re);
+    if (!m) continue;
+    const n = grabNum(t, m.index + m[0].length);
+    if (!n) continue;
+    const res = f.apply(n);
+    if (res) applied.push([f.label, res]);
+  }
+  if (applied.length) calc();
+  return applied;
+}
+
+function voiceUI(mode){
+  const listeningUI = mode === 'listening';
+  $('voiceModal').classList.toggle('show', mode !== 'closed');
+  $('voiceTitle').innerHTML = listeningUI
+    ? '<span class="rec-dot"></span>Listening…'
+    : 'Voice fill — applied';
+  $('voiceHint').style.display = listeningUI ? '' : 'none';
+  $('voiceStop').style.display = listeningUI ? '' : 'none';
+  $('voiceCancel').textContent = listeningUI ? 'Cancel' : 'Close';
+  $('voiceBtn').classList.toggle('listening', listeningUI);
+  if (listeningUI){ $('voiceResults').innerHTML = ''; $('voiceTranscript').innerHTML = '<span class="interim">…</span>'; }
+}
+
+$('voiceBtn').addEventListener('click', () => {
+  if (!SR){ toast('Voice input needs Chrome, Edge or Safari'); return; }
+  if (listening){ recog.stop(); return; }
+  voiceFinal = ''; voiceCancelled = false;
+  recog = new SR();
+  recog.lang = 'en-US';
+  recog.continuous = true;
+  recog.interimResults = true;
+  recog.onresult = ev => {
+    let interim = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++){
+      if (ev.results[i].isFinal) voiceFinal += ev.results[i][0].transcript + ' ';
+      else interim += ev.results[i][0].transcript;
+    }
+    $('voiceTranscript').innerHTML = escapeHtml(voiceFinal) + '<span class="interim">' + escapeHtml(interim) + '</span>';
+  };
+  recog.onerror = ev => {
+    listening = false;
+    if (ev.error === 'not-allowed'){
+      $('voiceTranscript').innerHTML = '<span class="interim">Microphone access was blocked — allow the mic for this page and try again.</span>';
+    }
+  };
+  recog.onend = () => {
+    listening = false;
+    if (voiceCancelled){ voiceUI('closed'); return; }
+    const applied = parseVoice(voiceFinal);
+    voiceUI('done');
+    $('voiceTranscript').innerHTML = escapeHtml(voiceFinal.trim() || '(nothing heard)');
+    $('voiceResults').innerHTML = applied.length
+      ? applied.map(([f,v]) => `<div class="vr"><span class="f">${f}</span><span class="v">${v}</span></div>`).join('')
+      : '<div class="empty-note">No fields recognized — try naming the field then the number, e.g. “rent 2,500”.</div>';
+  };
+  listening = true;
+  voiceUI('listening');
+  recog.start();
+});
+$('voiceStop').addEventListener('click', () => { if (listening) recog.stop(); });
+$('voiceCancel').addEventListener('click', () => {
+  if (listening){ voiceCancelled = true; recog.stop(); }
+  else voiceUI('closed');
+});
+
+/* ---------------- deal snapshot: PDF & email ---------------- */
+const REPORT_CSS = `
+  body { font-family: Georgia, 'Times New Roman', serif; color:#222; max-width:760px; margin:36px auto; padding:0 24px; line-height:1.5; }
+  header { border-bottom:3px double #222; padding-bottom:12px; margin-bottom:20px; }
+  h1 { font-size:24px; margin:0; }
+  .meta { color:#666; font-size:13px; margin-top:4px; }
+  h2 { font-size:15px; text-transform:uppercase; letter-spacing:.06em; border-bottom:1px solid #999; padding-bottom:4px; margin:24px 0 8px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { padding:5.5px 4px; border-bottom:1px solid #eee; text-align:left; vertical-align:top; }
+  td.r, th.r { text-align:right; white-space:nowrap; }
+  tr.total td { font-weight:bold; border-top:1px solid #999; }
+  .big { font-size:24px; font-weight:bold; }
+  .verdict { padding:10px 14px; border:1px solid #999; border-radius:6px; margin:12px 0; font-weight:bold; }
+  .note { margin-top:28px; font-size:11.5px; color:#777; border-top:1px solid #ddd; padding-top:8px; }
+  @media print { body { margin:0 auto; } .noprint { display:none; } }
+  .noprint { margin:18px 0; }
+  .noprint button { font-size:14px; padding:8px 16px; cursor:pointer; }`;
+
+function rentalSnapshot(){
+  const s = readState();
+  const r = compute(s);
+  const name = s.name || 'Untitled deal';
+  const kv = [
+    ['Purchase price', money0(s.price)],
+    ['Down payment', `${money0(r.downAmt)} (${s.downPct}%)`],
+    ['Rehab budget', money0(s.rehab)],
+    ['Total cash invested', money0(r.cashInvested)],
+    ['Gross rent', `${money0(s.rent)}/mo`],
+    ['Net operating income', `${money(r.noi)}/mo`],
+    ['Debt service', `${money0(r.pi)}/mo`],
+    ['Cash flow', `${money(r.cashFlow)}/mo`],
+    ['Cash-on-cash return', isFinite(r.coc) ? pct(r.coc,1) : '—'],
+    ['DSCR', isFinite(r.dscr) ? r.dscr.toFixed(2) : '—'],
+    ['5-year total ROI', isFinite(r.roi5) ? pct(r.roi5,0) : '—'],
+    ['Year-5 exit profit', money(r.totalProfit)],
+  ];
+  return { s, r, name, kv, verdict: $('verdictTitle').textContent };
+}
+
+$('pdfBtn').addEventListener('click', () => {
+  const snap = rentalSnapshot();
+  const { s, r } = snap;
+  const date = new Date().toLocaleDateString('en-US', {year:'numeric', month:'long', day:'numeric'});
+  const expRows = r.expLines.filter(e => e.monthly)
+    .map(e => `<tr><td>${e.label}</td><td class="r">−${money0(e.monthly)}</td></tr>`).join('') +
+    (r.utilTotal ? `<tr><td>Utilities</td><td class="r">−${money0(r.utilTotal)}</td></tr>` : '');
+  const finRows = [
+    ['Down payment', r.downAmt],
+    s.subtoOn ? ['Subject-to mortgage', r.subtoBal] : null,
+    s.sellerOn ? ['Seller financing', r.sellerAmt] : null,
+    ['New loan (bank)', r.newLoan],
+  ].filter(Boolean).map(([l,v]) => `<tr><td>${l}</td><td class="r">${money0(v)}</td></tr>`).join('');
+  const hood = s.hood || {};
+  const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Deal Report — ${escapeHtml(snap.name)}</title><style>${REPORT_CSS}</style></head><body>
+    <header><h1>${escapeHtml(snap.name)}</h1>
+      <div class="meta">${escapeHtml(s.prop.address || '')}${s.prop.address ? ' · ' : ''}Prepared ${date} · Real Estate Investor Toolkit</div></header>
+    <div class="noprint"><button onclick="print()">🖨 Print / Save as PDF</button></div>
+    <div class="verdict">${escapeHtml(snap.verdict)}</div>
+    <h2>Key Numbers</h2>
+    <table>${snap.kv.map(([k,v]) => `<tr><td>${k}</td><td class="r">${v}</td></tr>`).join('')}</table>
+    <h2>Monthly Cash Flow — Year 1</h2>
+    <table>
+      <tr><td>Gross rent</td><td class="r">${money0(s.rent)}</td></tr>
+      ${r.otherIncTotal ? `<tr><td>Other income</td><td class="r">${money0(r.otherIncTotal)}</td></tr>` : ''}
+      <tr><td>Vacancy (${s.vacancy}%)</td><td class="r">−${money0(r.vacLoss)}</td></tr>
+      ${expRows}
+      <tr class="total"><td>Net operating income</td><td class="r">${money(r.noi)}</td></tr>
+      <tr><td>Debt service</td><td class="r">−${money0(r.pi)}</td></tr>
+      <tr class="total"><td>Cash flow</td><td class="r">${money(r.cashFlow)}</td></tr>
+    </table>
+    <h2>Financing Stack</h2>
+    <table>${finRows}<tr class="total"><td>Total = purchase price</td><td class="r">${money0(r.downAmt + r.subtoBal + r.sellerAmt + r.newLoan)}</td></tr></table>
+    <h2>5-Year Pro-Forma</h2>
+    <table><tr><th>Year</th><th class="r">NOI</th><th class="r">Cash Flow</th><th class="r">Value</th><th class="r">Equity</th></tr>
+      ${r.years.map(y => `<tr><td>Year ${y.y}</td><td class="r">${money0(y.yNOI)}</td><td class="r">${money(y.yCF)}</td><td class="r">${money0(y.value)}</td><td class="r">${money0(y.equity)}</td></tr>`).join('')}
+    </table>
+    ${sowItems.length ? `<h2>Rehab — Scope of Work</h2><table>${SOW_SECTIONS.map(sec => {
+      const t = sowItems.filter(i => i.sec === sec.id).reduce((a,i)=>a+(i.cost||0),0);
+      return t ? `<tr><td>${sec.label}</td><td class="r">${money0(t)}</td></tr>` : '';
+    }).join('')}<tr class="total"><td>Total rehab budget</td><td class="r">${money0(sowTotal())}</td></tr></table>` : ''}
+    ${(() => {
+      const cx = (s.capex || []).filter(c => (c.name||'').trim() && (String(c.year).trim() || c.cond || (c.notes||'').trim()));
+      return cx.length ? `<h2>Capital Expenditures — Condition</h2><table>
+        <tr><th>Item</th><th class="r">Installed</th><th class="r">Condition</th><th>Notes</th></tr>
+        ${cx.map(c => `<tr><td>${escapeHtml(c.name)}${capexFlagged(c) ? ' ⚠' : ''}</td><td class="r">${escapeHtml(String(c.year||'—'))}</td><td class="r">${escapeHtml(c.cond||'—')}</td><td>${escapeHtml(c.notes||'')}</td></tr>`).join('')}
+      </table>` : '';
+    })()}
+    ${(hood.crime || hood.schools || hood.notes) ? `<h2>Neighborhood Notes</h2><table>
+      ${hood.crime ? `<tr><td>Crime level</td><td class="r">${escapeHtml(hood.crime)}</td></tr>` : ''}
+      ${hood.schools ? `<tr><td>Schools rating</td><td class="r">${escapeHtml(hood.schools)}</td></tr>` : ''}
+      ${hood.notes ? `<tr><td colspan="2">${escapeHtml(hood.notes)}</td></tr>` : ''}
+    </table>` : ''}
+    <p class="note">Estimates for screening purposes only — verify taxes, insurance, rents and rehab costs locally before making offers. Generated by Real Estate Investor Toolkit.</p>
+  </body></html>`;
+  const w = window.open('', '_blank');
+  if (!w){ toast('Pop-up blocked — allow pop-ups to open the report'); return; }
+  w.document.write(doc); w.document.close();
+  setTimeout(() => { try { w.focus(); w.print(); } catch {} }, 500);
+});
+
+$('emailBtn').addEventListener('click', () => {
+  const snap = rentalSnapshot();
+  const body = `${snap.name}${snap.s.prop.address ? ' — ' + snap.s.prop.address : ''}\n${snap.verdict}\n\n` +
+    snap.kv.map(([k,v]) => `${k}: ${v}`).join('\n') +
+    '\n\n— Generated by Real Estate Investor Toolkit';
+  location.href = `mailto:?subject=${encodeURIComponent('Deal report — ' + snap.name)}&body=${encodeURIComponent(body)}`;
+});
+
+/* init */
+Shell.mount('rental');
+window.addEventListener('shell:user', () => renderSaved());   /* switch deal history per account */
+document.querySelectorAll('input').forEach(i => i.setAttribute('autocomplete','off'));
+try { $('rcKey').value = localStorage.getItem('rentcastKey') || ''; } catch {}
+renderSaved();
+let draft = null;
+try { draft = JSON.parse(localStorage.getItem(draftKey())); } catch {}
+if (sessionStorage.getItem('rentalCalc.reset')) {
+  sessionStorage.removeItem('rentalCalc.reset');
+  applyDefaults();
+} else if (draft && typeof draft === 'object' && isFinite(draft.price)) {
+  applyState(draft);          /* overrides any browser form restoration */
+} else {
+  applyDefaults();            /* no draft: enforce defaults over browser restoration */
+}
+window.addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+</script>
+</body>
+</html>

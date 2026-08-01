@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portfolio ROE Dashboard — Real Estate Investor Toolkit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<link rel="stylesheet" href="shared.css">
+<style>
+.tool-title { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 16px; }
+.tool-title h1 { font-family:var(--display); font-weight:500; font-size:24px; letter-spacing:-.01em; }
+.toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.toolbar select {
+  font-family:var(--sans); font-size:12.5px; font-weight:600; padding:9px 10px;
+  border:1px solid var(--line-strong); border-radius:8px; background:var(--card); color:var(--ink);
+  max-width:240px;
+}
+
+/* leaderboard */
+.lb-row { display:flex; align-items:center; gap:10px; padding:6px 0; }
+.lb-name { width:200px; min-width:120px; font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lb-track { flex:1; height:18px; background:var(--line); border-radius:99px; overflow:hidden; }
+.lb-bar { height:100%; background:var(--accent); border-radius:99px; transition:width .3s; min-width:2px; display:block; }
+.lb-bar.low { background:var(--neg); }
+.lb-bar.mid { background:var(--warn); }
+.lb-val { font-family:var(--mono); font-size:12px; font-weight:600; width:200px; text-align:right; white-space:nowrap; }
+@media (max-width:700px){ .lb-val { width:auto; } .lb-name { width:120px; } }
+
+/* property table (read-only rows; editing happens in the pop-up) */
+.pt-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:4px; }
+.pt-head, .pt-row {
+  display:grid;
+  grid-template-columns: 34px minmax(170px,1fr) 100px 104px 96px 70px 70px 96px 60px 30px;
+  gap:8px; align-items:center; min-width:900px;
+}
+.pt-head span {
+  font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:.04em;
+  text-transform:uppercase; color:var(--ink-faint); padding-bottom:4px; white-space:nowrap;
+}
+.pt-head span.r { text-align:right; }
+.pt-row { padding:8px 0; border-bottom:1px solid var(--line); cursor:pointer; }
+.pt-row:hover { background:#fbfaf7; }
+.pt-row:last-child { border-bottom:none; }
+.pt-row .pname { font-size:13px; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pt-row .pname .sub { display:block; font-size:10.5px; font-weight:500; color:var(--ink-faint); }
+.pt-row .c { font-family:var(--mono); font-size:12.5px; font-weight:600; text-align:right; white-space:nowrap; }
+.pt-row .c.pos { color:var(--accent-strong); }
+.pt-row .c.neg { color:var(--neg); }
+.pt-row .c.roe-hi { color:var(--accent-strong); }
+.pt-row .c.roe-lo { color:var(--neg); }
+.pt-row .rank { font-size:14px; text-align:center; }
+.pt-row .edit, .pt-row .del {
+  border:none; background:none; color:var(--ink-faint); font-size:12px; cursor:pointer;
+  width:30px; height:30px; border-radius:7px; justify-self:end;
+}
+.pt-row .edit:hover { background:var(--accent-soft); color:var(--accent-strong); }
+.pt-row .del:hover { background:var(--neg-soft); color:var(--neg); }
+.lazy-note {
+  border:1px solid #e2d4a8; background:var(--warn-soft); color:var(--warn);
+  border-radius:8px; padding:10px 12px; margin-top:12px; font-size:12.5px; font-weight:600; display:none;
+}
+.lazy-note.show { display:block; }
+
+/* ---------- property modal ---------- */
+.pmodal {
+  position:fixed; inset:0; background:rgba(33,37,43,.45); display:none;
+  align-items:flex-start; justify-content:center; z-index:70; padding:20px 14px; overflow-y:auto;
+}
+.pmodal.show { display:flex; }
+.pmodal-card {
+  background:var(--card); border-radius:14px; max-width:600px; width:100%;
+  box-shadow:0 20px 60px rgba(0,0,0,.3); padding:20px 22px; margin:auto 0;
+}
+.pmodal-card h3 { font-family:var(--display); font-size:19px; font-weight:600; margin-bottom:2px; }
+.pmodal-card .pm-sub { font-size:12px; color:var(--ink-soft); margin-bottom:14px; }
+.pm-sec {
+  font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--ink-faint); margin:14px 0 6px; border-bottom:1px solid var(--line); padding-bottom:4px;
+}
+.pm-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; }
+@media (max-width:560px){ .pm-grid { grid-template-columns:1fr; } }
+.pm-field label { display:block; font-size:11.5px; font-weight:600; color:var(--ink-soft); margin-bottom:3px; }
+.pm-field input[type=text], .pm-field input[type=date], .pm-field .num {
+  width:100%; font-size:13px; padding:8px 10px; border:1px solid var(--line-strong);
+  border-radius:7px; background:#fdfcfa; color:var(--ink); font-family:var(--mono); text-align:right;
+}
+.pm-field input[type=text].plain { font-family:var(--sans); text-align:left; font-weight:600; }
+.pm-field input[type=date] { font-family:var(--sans); text-align:left; }
+.pm-field input:focus { outline:2px solid var(--accent); outline-offset:-1px; background:#fff; }
+.pm-unit { display:flex; gap:6px; align-items:center; }
+.pm-unit .num { flex:1; }
+.pm-computed {
+  background:var(--accent-soft); border:1px solid #bcd8d0; border-radius:10px;
+  padding:12px 14px; margin-top:14px;
+}
+.pm-computed .row-c { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; }
+.pm-computed .row-c label { font-size:12px; font-weight:600; color:var(--ink-soft); }
+.pm-computed .row-c .v { font-family:var(--mono); font-size:14px; font-weight:700; color:var(--accent-strong); }
+.pm-computed .row-c .v.neg { color:var(--neg); }
+.pm-cf { display:flex; align-items:center; gap:8px; }
+.pm-cf .num { width:120px; font-weight:700; }
+.pm-cf .auto {
+  font-size:10.5px; font-weight:700; color:var(--accent-strong); cursor:pointer;
+  background:none; border:1px solid #bcd8d0; border-radius:99px; padding:3px 9px;
+}
+.pm-cf .auto.off { color:var(--warn); border-color:#e2d4a8; }
+.pm-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="shellHeader"></div>
+
+  <div class="tool-title">
+    <h1>Portfolio ROE Dashboard</h1>
+    <div class="toolbar">
+      <select id="dealImport"><option value="">Import from a saved deal…</option></select>
+      <select id="sortBy" title="Rank properties by">
+        <option value="roe">Rank by ROE</option>
+        <option value="coc">Rank by CoC</option>
+        <option value="cf">Rank by cash flow</option>
+        <option value="equity">Rank by equity</option>
+      </select>
+      <button class="btn primary" id="addBtn">+ Add property</button>
+    </div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="t-label">Portfolio Value</div><div class="t-value" id="tValue">—</div><div class="t-note" id="tValueNote">across 0 properties</div></div>
+    <div class="tile hero"><div class="t-label">Your Equity</div><div class="t-value" id="tEquity">—</div><div class="t-note" id="tEquityNote">value − loans, × ownership</div></div>
+    <div class="tile"><div class="t-label">Monthly Cash Flow</div><div class="t-value" id="tCF">—</div><div class="t-note">your share, after debt</div></div>
+    <div class="tile"><div class="t-label">Blended ROE</div><div class="t-value" id="tROE">—</div><div class="t-note" id="tROENote">cash flow + paydown ÷ equity</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Performance Leaderboard <span class="tag">Best first</span></h2>
+    <div class="body">
+      <div id="leaderboard"><div class="empty-note">Add properties below to see how they rank.</div></div>
+      <div class="lazy-note" id="lazyNote"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Properties <span class="tag">Click a row to edit</span></h2>
+    <div class="body">
+      <div class="pt-scroll">
+        <div class="pt-head">
+          <span></span><span>Property</span><span class="r">Value</span><span class="r">Loan bal</span>
+          <span class="r">Equity*</span><span class="r">CF /mo*</span><span class="r">CoC</span><span class="r">ROE</span><span></span><span></span>
+        </div>
+        <div id="ptRows"></div>
+      </div>
+      <div class="empty-note" id="ptEmpty" style="margin-top:8px;">No properties yet — hit “+ Add property”, or import a saved deal from the Rental Analyzer.</div>
+    </div>
+  </div>
+
+  <p class="footnote">* Equity and cash flow are shown as <strong>your share</strong> (scaled by ownership %). <strong>Cash-on-cash</strong> = annual net cash flow ÷ cash invested (down payment + additional cash in). <strong>Return on equity</strong> = (annual cash flow + annual principal paydown) ÷ current equity — how hard the money trapped in the property today is working. Low ROE with big equity = "lazy equity": consider a cash-out refi, HELOC, or 1031 exchange.</p>
+</div>
+
+<!-- ---------- add / edit property pop-up ---------- -->
+<div class="pmodal" id="pModal">
+  <div class="pmodal-card">
+    <h3 id="pmTitle">Add property</h3>
+    <div class="pm-sub">Every field feeds the dashboard — cash-on-cash and ROE compute live at the bottom.</div>
+
+    <div class="pm-sec">Property</div>
+    <div class="pm-field"><label>Nickname / address</label><input type="text" class="plain" id="pm_name" placeholder="e.g. 123 Main St duplex"></div>
+    <div class="pm-grid" style="margin-top:8px;">
+      <div class="pm-field"><label>Date acquired</label><input type="date" id="pm_date"></div>
+      <div class="pm-field"><label>Ownership %</label><input class="num" id="pm_own" inputmode="decimal" value="100"></div>
+    </div>
+
+    <div class="pm-sec">Basis &amp; Value</div>
+    <div class="pm-grid">
+      <div class="pm-field"><label>Purchase price</label><input class="num" id="pm_price" inputmode="decimal" placeholder="0"></div>
+      <div class="pm-field"><label>Current market value</label><input class="num" id="pm_value" inputmode="decimal" placeholder="0"></div>
+      <div class="pm-field"><label>Down payment</label><input class="num" id="pm_down" inputmode="decimal" placeholder="0"></div>
+      <div class="pm-field"><label>Additional cash in <span style="font-weight:400">(rehab, closing…)</span></label><input class="num" id="pm_other" inputmode="decimal" placeholder="0"></div>
+    </div>
+
+    <div class="pm-sec">Financing</div>
+    <div class="pm-grid">
+      <div class="pm-field"><label>Loan balance (today)</label><input class="num" id="pm_loan" inputmode="decimal" placeholder="0"></div>
+      <div class="pm-field"><label>Interest rate %</label><input class="num" id="pm_rate" inputmode="decimal" placeholder="0"></div>
+      <div class="pm-field"><label>Monthly loan payment (P&amp;I)</label><input class="num" id="pm_pay" inputmode="decimal" placeholder="0"></div>
+    </div>
+
+    <div class="pm-sec">Income &amp; Expenses</div>
+    <div class="pm-grid">
+      <div class="pm-field"><label>Gross income</label>
+        <div class="pm-unit"><input class="num" id="pm_income" inputmode="decimal" placeholder="0">
+          <div class="unit-toggle" data-u-for="income"><button type="button" data-u="mo" class="on">$/mo</button><button type="button" data-u="yr">$/yr</button></div>
+        </div>
+      </div>
+      <div class="pm-field"><label>Operating expenses <span style="font-weight:400">(excl. tax &amp; ins.)</span></label>
+        <div class="pm-unit"><input class="num" id="pm_opex" inputmode="decimal" placeholder="0">
+          <div class="unit-toggle" data-u-for="opex"><button type="button" data-u="mo" class="on">$/mo</button><button type="button" data-u="yr">$/yr</button></div>
+        </div>
+      </div>
+      <div class="pm-field"><label>Property taxes</label>
+        <div class="pm-unit"><input class="num" id="pm_taxes" inputmode="decimal" placeholder="0">
+          <div class="unit-toggle" data-u-for="taxes"><button type="button" data-u="mo" class="on">$/mo</button><button type="button" data-u="yr">$/yr</button></div>
+        </div>
+      </div>
+      <div class="pm-field"><label>Insurance</label>
+        <div class="pm-unit"><input class="num" id="pm_ins" inputmode="decimal" placeholder="0">
+          <div class="unit-toggle" data-u-for="ins"><button type="button" data-u="mo" class="on">$/mo</button><button type="button" data-u="yr">$/yr</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pm-computed">
+      <div class="row-c">
+        <label>Net cash flow /mo</label>
+        <span class="pm-cf">
+          <button class="auto" id="pm_cfAuto" title="Computed from income − expenses − debt. Click to type your own number.">auto</button>
+          <input class="num" id="pm_cf" inputmode="decimal">
+        </span>
+      </div>
+      <div class="row-c"><label>Cash-on-cash return</label><span class="v" id="pm_coc">—</span></div>
+      <div class="row-c"><label>Return on equity</label><span class="v" id="pm_roe">—</span></div>
+      <div class="row-c"><label>Your equity</label><span class="v" id="pm_eq">—</span></div>
+      <div class="row-c"><label>Appreciation since purchase</label><span class="v" id="pm_appr">—</span></div>
+    </div>
+
+    <div class="pm-actions">
+      <button class="btn ghost" id="pmCancel">Cancel</button>
+      <button class="btn primary" id="pmSave">Save property</button>
+    </div>
+  </div>
+</div>
+
+<script src="shell.js"></script>
+<script>
+'use strict';
+Shell.mount('portfolio');
+
+const $ = id => document.getElementById(id);
+const money = n => (n<0?'−$':'$') + Math.round(Math.abs(n)).toLocaleString('en-US');
+const money0 = n => '$' + Math.round(Math.abs(n)).toLocaleString('en-US');
+const pctf = (n,d=1) => (isFinite(n) ? n.toFixed(d) : '—') + '%';
+const parseNum = s => { const n = parseFloat(String(s).replace(/[^0-9.\-]/g,'')); return isFinite(n)? n:0; };
+const esc = s => { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; };
+
+const PKEY = () => Shell.getUser()?.sub ? `portfolio.v1.u.${Shell.getUser().sub}` : 'portfolio.v1';
+const RENTAL_DEALS = () => Shell.getUser()?.sub ? `rentalDeals.v3.u.${Shell.getUser().sub}` : 'rentalDeals.v3';
+
+/* property: {name, dateAcq, ownPct, price, down, other, value, loan, rate, pay,
+              income:{v,unit}, opex:{v,unit}, taxes:{v,unit}, ins:{v,unit}, cfOverride:null|number} */
+let props = [];
+
+function migrate(p){
+  if (p.income) return p;                       /* already v2 */
+  return {                                      /* v1 row → v2 */
+    name: p.name || '', dateAcq: '', ownPct: 100,
+    price: 0, down: p.invested || 0, other: 0,
+    value: p.value || 0, loan: p.loan || 0, rate: p.rate || 0, pay: p.pay || 0,
+    income: {v: p.rent || 0, unit:'mo'}, opex: {v: p.opex || 0, unit:'mo'},
+    taxes: {v: 0, unit:'mo'}, ins: {v: 0, unit:'mo'}, cfOverride: null,
+  };
+}
+function load(){
+  try { props = (JSON.parse(localStorage.getItem(PKEY())) || []).map(migrate); } catch { props = []; }
+}
+function save(){
+  try { localStorage.setItem(PKEY(), JSON.stringify(props)); } catch {}
+}
+
+/* ---------------- metrics ---------------- */
+const perMo = u => u.unit === 'yr' ? (u.v || 0)/12 : (u.v || 0);
+function metrics(p){
+  const own = (p.ownPct > 0 ? p.ownPct : 100)/100;
+  const incomeM = perMo(p.income), expM = perMo(p.opex) + perMo(p.taxes) + perMo(p.ins);
+  const cfAuto = incomeM - expM - (p.pay || 0);
+  const cfM = (p.cfOverride ?? cfAuto);
+  const cfY = cfM * 12;
+  const invested = (p.down || 0) + (p.other || 0);
+  const coc = invested > 0 ? cfY / invested * 100 : NaN;
+  const equityFull = (p.value || 0) - (p.loan || 0);
+  const paydownY = p.loan > 0 ? Math.max(0, (p.pay || 0)*12 - p.loan * (p.rate || 0)/100) : 0;
+  const roe = equityFull > 0 ? (cfY + paydownY) / equityFull * 100 : NaN;
+  const appr = p.price > 0 ? ((p.value || 0) - p.price)/p.price*100 : NaN;
+  let holdYrs = NaN;
+  if (p.dateAcq){ holdYrs = (Date.now() - new Date(p.dateAcq).getTime()) / 31557600000; }
+  return { cfAuto, cfM, cfY, coc, equityFull, equityShare: equityFull*own,
+           cfShare: cfM*own, paydownY, roe, appr, holdYrs, own };
+}
+function sortKey(p){
+  const m = metrics(p);
+  const by = $('sortBy').value;
+  return by === 'coc' ? (isFinite(m.coc) ? m.coc : -1e9)
+       : by === 'cf' ? m.cfShare
+       : by === 'equity' ? m.equityShare
+       : (isFinite(m.roe) ? m.roe : -1e9);
+}
+const MEDALS = ['🥇','🥈','🥉'];
+
+/* ---------------- dashboard render ---------------- */
+function renderAll(){
+  const order = [...props].sort((a,b) => sortKey(b) - sortKey(a));
+
+  let tv=0, teq=0, tcf=0, tinv=0, tret=0;
+  props.forEach(p => {
+    const m = metrics(p);
+    tv += (p.value||0) * m.own;
+    teq += m.equityShare;
+    tcf += m.cfShare;
+    tinv += ((p.down||0)+(p.other||0)) * m.own;
+    tret += (m.cfY + m.paydownY) * m.own;
+  });
+  $('tValue').textContent = props.length ? money0(tv) : '—';
+  $('tValueNote').textContent = `across ${props.length} propert${props.length===1?'y':'ies'} (your share)`;
+  $('tEquity').textContent = props.length ? money0(teq) : '—';
+  $('tEquityNote').textContent = tv > 0 ? `${Math.round(teq/tv*100)}% of portfolio value` : 'value − loans, × ownership';
+  const cfEl = $('tCF');
+  cfEl.textContent = props.length ? money(tcf) : '—';
+  cfEl.className = 't-value ' + (tcf >= 0 ? 'pos' : 'neg');
+  const bRoe = teq > 0 ? tret/teq*100 : NaN;
+  const bCoc = tinv > 0 ? (tcf*12)/tinv*100 : NaN;
+  $('tROE').textContent = props.length && isFinite(bRoe) ? pctf(bRoe) : '—';
+  $('tROENote').textContent = isFinite(bCoc) ? `blended CoC ${pctf(bCoc)}` : 'cash flow + paydown ÷ equity';
+
+  /* leaderboard */
+  const lb = $('leaderboard');
+  lb.innerHTML = '';
+  const ranked = order.map(p => ({p, m: metrics(p)})).filter(x => isFinite(x.m.roe));
+  if (!ranked.length){
+    lb.innerHTML = '<div class="empty-note">Add properties below to see how they rank.</div>';
+  } else {
+    const maxRoe = Math.max(...ranked.map(x => x.m.roe), 1);
+    ranked.forEach((x, i) => {
+      const row = document.createElement('div');
+      row.className = 'lb-row';
+      const cls = x.m.roe < 6 ? 'low' : x.m.roe < 10 ? 'mid' : '';
+      row.innerHTML = `
+        <span class="lb-name">${MEDALS[i] ? MEDALS[i]+' ' : ''}${esc(x.p.name || 'Property '+(i+1))}</span>
+        <span class="lb-track"><span class="lb-bar ${cls}" style="width:${Math.max(2, x.m.roe/maxRoe*100)}%"></span></span>
+        <span class="lb-val">ROE ${pctf(x.m.roe)} · CoC ${isFinite(x.m.coc)?pctf(x.m.coc):'—'} · ${money(x.m.cfShare)}/mo</span>`;
+      lb.appendChild(row);
+    });
+  }
+
+  const lazy = ranked.filter(x => x.m.roe < 6 && x.m.equityShare > 25000);
+  const ln = $('lazyNote');
+  if (lazy.length){
+    ln.innerHTML = `💤 Lazy equity: <b>${lazy.map(x=>esc(x.p.name||'unnamed')).join(', ')}</b> ${lazy.length===1?'is':'are'} returning under 6% on ${money0(lazy.reduce((a,x)=>a+x.m.equityShare,0))} of your equity — worth modeling a cash-out refi, HELOC, or 1031 into a stronger deal.`;
+    ln.classList.add('show');
+  } else ln.classList.remove('show');
+
+  const wrap = $('ptRows');
+  wrap.innerHTML = '';
+  $('ptEmpty').style.display = props.length ? 'none' : 'block';
+  order.forEach((p, i) => wrap.appendChild(propRow(p, i)));
+}
+
+function propRow(p, rankIdx){
+  const m = metrics(p);
+  const el = document.createElement('div');
+  el.className = 'pt-row';
+  const subBits = [];
+  if (p.dateAcq) subBits.push(`acquired ${p.dateAcq}${isFinite(m.holdYrs)?` · ${m.holdYrs.toFixed(1)} yrs`:''}`);
+  if ((p.ownPct||100) !== 100) subBits.push(`${p.ownPct}% owned`);
+  if (isFinite(m.appr)) subBits.push(`▲ ${m.appr.toFixed(0)}% since purchase`);
+  el.innerHTML = `
+    <span class="rank">${MEDALS[rankIdx] || ''}</span>
+    <span class="pname">${esc(p.name || 'Unnamed property')}${subBits.length?`<span class="sub">${esc(subBits.join(' · '))}</span>`:''}</span>
+    <span class="c">${money0(p.value||0)}</span>
+    <span class="c">${money0(p.loan||0)}</span>
+    <span class="c ${m.equityShare<0?'neg':''}">${money(m.equityShare)}</span>
+    <span class="c ${m.cfShare>=0?'pos':'neg'}">${money(m.cfShare)}</span>
+    <span class="c">${isFinite(m.coc)?pctf(m.coc):'—'}</span>
+    <span class="c ${isFinite(m.roe) ? (m.roe>=10?'roe-hi':m.roe<6?'roe-lo':'') : ''}">${isFinite(m.roe)?pctf(m.roe):'—'}</span>
+    <button class="edit" title="Edit">✎</button>
+    <button class="del" title="Remove">✕</button>`;
+  const openEdit = () => openModal(p);
+  el.addEventListener('click', ev => { if (!ev.target.closest('.del')) openEdit(); });
+  el.querySelector('.del').addEventListener('click', ev => {
+    ev.stopPropagation();
+    if (!confirm(`Remove "${p.name || 'this property'}" from the portfolio?`)) return;
+    props = props.filter(x => x !== p);
+    save(); renderAll();
+  });
+  return el;
+}
+
+/* ---------------- add / edit modal ---------------- */
+const UNITS = { income:'mo', opex:'mo', taxes:'mo', ins:'mo' };
+let editing = null;        /* property being edited, or null when adding */
+let cfOverride = null;     /* modal-local override state */
+
+document.querySelectorAll('#pModal .unit-toggle').forEach(t => {
+  t.addEventListener('click', ev => {
+    const b = ev.target.closest('button'); if (!b) return;
+    const key = t.dataset.uFor;
+    if (UNITS[key] !== b.dataset.u){
+      const inp = $('pm_' + key);
+      const v = parseNum(inp.value);
+      if (v) inp.value = b.dataset.u === 'yr' ? Math.round(v*12) : Math.round(v/12);
+    }
+    UNITS[key] = b.dataset.u;
+    t.querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+    pmRecalc();
+  });
+});
+function setModalUnit(key, u){
+  UNITS[key] = u;
+  const t = document.querySelector(`#pModal .unit-toggle[data-u-for="${key}"]`);
+  t.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.u === u));
+}
+
+function modalState(){
+  return {
+    name: $('pm_name').value.trim(),
+    dateAcq: $('pm_date').value,
+    ownPct: parseNum($('pm_own').value) || 100,
+    price: parseNum($('pm_price').value),
+    value: parseNum($('pm_value').value),
+    down: parseNum($('pm_down').value),
+    other: parseNum($('pm_other').value),
+    loan: parseNum($('pm_loan').value),
+    rate: parseNum($('pm_rate').value),
+    pay: parseNum($('pm_pay').value),
+    income: {v: parseNum($('pm_income').value), unit: UNITS.income},
+    opex:   {v: parseNum($('pm_opex').value),   unit: UNITS.opex},
+    taxes:  {v: parseNum($('pm_taxes').value),  unit: UNITS.taxes},
+    ins:    {v: parseNum($('pm_ins').value),    unit: UNITS.ins},
+    cfOverride,
+  };
+}
+function pmRecalc(){
+  const m = metrics(modalState());
+  if (cfOverride === null) $('pm_cf').value = Math.round(m.cfAuto).toLocaleString('en-US');
+  const autoBtn = $('pm_cfAuto');
+  autoBtn.textContent = cfOverride === null ? 'auto' : 'manual';
+  autoBtn.classList.toggle('off', cfOverride !== null);
+  const set = (id, txt, neg) => { const e = $(id); e.textContent = txt; e.className = 'v' + (neg ? ' neg' : ''); };
+  set('pm_coc', isFinite(m.coc) ? pctf(m.coc) : '—', m.coc < 0);
+  set('pm_roe', isFinite(m.roe) ? pctf(m.roe) : '—', m.roe < 0);
+  set('pm_eq', money(m.equityShare), m.equityShare < 0);
+  set('pm_appr', isFinite(m.appr) ? pctf(m.appr, 0) : '—', m.appr < 0);
+}
+['pm_name','pm_date','pm_own','pm_price','pm_value','pm_down','pm_other','pm_loan','pm_rate','pm_pay','pm_income','pm_opex','pm_taxes','pm_ins']
+  .forEach(id => $(id).addEventListener('input', pmRecalc));
+$('pm_cf').addEventListener('input', () => { cfOverride = parseNum($('pm_cf').value); pmRecalc(); });
+$('pm_cfAuto').addEventListener('click', () => { cfOverride = null; pmRecalc(); });
+
+function openModal(p){
+  editing = p || null;
+  cfOverride = p?.cfOverride ?? null;
+  $('pmTitle').textContent = p ? `Edit — ${p.name || 'property'}` : 'Add property';
+  $('pm_name').value = p?.name || '';
+  $('pm_date').value = p?.dateAcq || '';
+  $('pm_own').value = p?.ownPct ?? 100;
+  const setN = (id, v) => $(id).value = v ? Math.round(v).toLocaleString('en-US') : '';
+  setN('pm_price', p?.price); setN('pm_value', p?.value);
+  setN('pm_down', p?.down); setN('pm_other', p?.other);
+  setN('pm_loan', p?.loan); setN('pm_pay', p?.pay);
+  $('pm_rate').value = p?.rate || '';
+  $('pm_income').value = p?.income?.v || ''; setModalUnit('income', p?.income?.unit || 'mo');
+  $('pm_opex').value = p?.opex?.v || '';     setModalUnit('opex', p?.opex?.unit || 'mo');
+  $('pm_taxes').value = p?.taxes?.v || '';   setModalUnit('taxes', p?.taxes?.unit || 'mo');
+  $('pm_ins').value = p?.ins?.v || '';       setModalUnit('ins', p?.ins?.unit || 'mo');
+  pmRecalc();
+  $('pModal').classList.add('show');
+  $('pm_name').focus();
+}
+function closeModal(){ $('pModal').classList.remove('show'); editing = null; }
+
+$('addBtn').addEventListener('click', () => openModal(null));
+$('pmCancel').addEventListener('click', closeModal);
+$('pModal').addEventListener('click', ev => { if (ev.target === $('pModal')) closeModal(); });
+$('pmSave').addEventListener('click', () => {
+  const s = modalState();
+  if (!s.name){ $('pm_name').focus(); Shell.toast('Give the property a name'); return; }
+  if (editing) Object.assign(editing, s);
+  else props.push(s);
+  save(); renderAll(); closeModal();
+  Shell.toast(editing ? 'Property updated' : `"${s.name}" added to your portfolio`);
+});
+$('sortBy').addEventListener('change', renderAll);
+
+/* ---------------- import from saved analyzer deals ---------------- */
+function monthlyPI(loan, ratePct, years){
+  if (loan <= 0 || years <= 0) return 0;
+  const r = ratePct/100/12, n = years*12;
+  if (r === 0) return loan/n;
+  return loan * r / (1 - Math.pow(1+r, -n));
+}
+function fillDealImport(){
+  let deals = [];
+  try { deals = JSON.parse(localStorage.getItem(RENTAL_DEALS())) || []; } catch {}
+  const sel = $('dealImport');
+  sel.innerHTML = '<option value="">Import from a saved deal…</option>' +
+    deals.map((d,i) => `<option value="${i}">${esc(d.name)} — ${money0(d.price)}</option>`).join('');
+  sel.onchange = () => {
+    const d = deals[+sel.value];
+    if (!d) return;
+    sel.value = '';
+    const downAmt = d.price * (d.downPct||0)/100;
+    const loan = Math.max(0, d.price - downAmt - (d.sellerOn? d.sellerAmt||0:0) - (d.subtoOn? d.subtoBal||0:0));
+    const closing = d.closingUnit === '%' ? d.price*(d.closing||0)/100 : (d.closing||0);
+    openModal(null);
+    $('pm_name').value = d.name || d.prop?.address || 'Imported deal';
+    const setN = (id, v) => $(id).value = v ? Math.round(v).toLocaleString('en-US') : '';
+    setN('pm_price', d.price); setN('pm_value', d.prop?.list || d.price);
+    setN('pm_down', downAmt); setN('pm_other', (d.rehab||0) + closing);
+    setN('pm_loan', loan); setN('pm_pay', monthlyPI(loan, d.rate||0, d.term||30));
+    $('pm_rate').value = d.rate || '';
+    $('pm_income').value = d.rent || ''; setModalUnit('income', 'mo');
+    $('pm_taxes').value = d.expenses?.tax || ''; setModalUnit('taxes', d.units?.tax === 'yr' ? 'yr' : 'mo');
+    $('pm_ins').value = d.expenses?.ins || '';   setModalUnit('ins', d.units?.ins === 'yr' ? 'yr' : 'mo');
+    pmRecalc();
+    Shell.toast('Deal loaded into the form — add remaining operating expenses, then Save');
+  };
+}
+
+window.addEventListener('shell:user', () => { load(); fillDealImport(); renderAll(); });
+
+/* init */
+document.querySelectorAll('input').forEach(i => i.setAttribute('autocomplete','off'));
+load();
+fillDealImport();
+renderAll();
+</script>
+</body>
+</html>

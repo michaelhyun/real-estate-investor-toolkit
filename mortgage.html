@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mortgage Calculator — Real Estate Investor Toolkit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<link rel="stylesheet" href="shared.css">
+<style>
+.tool-title { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 16px; }
+.tool-title h1 { font-family:var(--display); font-weight:500; font-size:24px; letter-spacing:-.01em; }
+.grid { display:grid; grid-template-columns: 400px 1fr; gap:22px; align-items:start; }
+.grid > div { min-width:0; }
+@media (max-width: 980px){ .grid { grid-template-columns:1fr; } }
+
+/* payment composition bar */
+.pay-hero { text-align:center; padding:6px 0 2px; }
+.pay-hero .ph-num { font-family:var(--mono); font-size:38px; font-weight:600; letter-spacing:-.02em; color:var(--accent-strong); }
+.pay-hero .ph-sub { font-size:12px; color:var(--ink-faint); margin-top:2px; }
+.comp-bar { display:flex; height:14px; border-radius:99px; overflow:hidden; margin:16px 0 10px; background:var(--line); }
+.comp-bar div { height:100%; }
+.legend { display:flex; flex-wrap:wrap; gap:6px 16px; justify-content:center; }
+.legend .li { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-soft); font-weight:600; }
+.legend .sw { width:10px; height:10px; border-radius:3px; }
+.legend b { font-family:var(--mono); color:var(--ink); font-weight:600; }
+.c-pi   { background:#1d6a5a; }
+.c-tax  { background:#4d9a89; }
+.c-ins  { background:#8fc3b6; }
+.c-pmi  { background:#c9a13b; }
+.c-hoa  { background:#b4552d; }
+
+/* amortization table */
+.am-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+table.am { width:100%; border-collapse:collapse; min-width:540px; }
+table.am th, table.am td { padding:7px 10px; font-size:12.5px; text-align:right; white-space:nowrap; }
+table.am th:first-child, table.am td:first-child { text-align:left; }
+table.am thead th {
+  font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.04em;
+  color:var(--ink-faint); border-bottom:1.5px solid var(--line-strong); text-transform:uppercase;
+}
+table.am tbody td { font-family:var(--mono); font-weight:500; border-bottom:1px solid var(--line); }
+table.am tbody td:first-child { font-family:var(--sans); color:var(--ink-soft); }
+table.am tr.milestone td { background:var(--accent-soft); }
+
+.deal-import { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.deal-import select {
+  font-family:var(--sans); font-size:12.5px; font-weight:600; padding:9px 10px;
+  border:1px solid var(--line-strong); border-radius:8px; background:var(--card); color:var(--ink);
+  max-width:260px;
+}
+.savings-box { border:1px solid #bcd8d0; background:var(--accent-soft); border-radius:8px; padding:12px 14px; margin-top:12px; font-size:13px; color:var(--accent-strong); display:none; }
+.savings-box.show { display:block; }
+.savings-box b { font-family:var(--mono); }
+.fin-sub { display:none; border:1px solid var(--line); border-radius:8px; background:#fdfcfa; padding:4px 12px 8px; margin:2px 0 8px; }
+.fin-sub.on { display:block; }
+.fin-sub .row { padding:5px 0; }
+.fin-sub .row label { font-size:12.5px; }
+.fin-sub select {
+  font-family:var(--sans); font-size:12.5px; padding:7px 9px; border:1px solid var(--line-strong);
+  border-radius:7px; background:#fff; color:var(--ink);
+}
+.arm-note {
+  border:1px solid #e2d4a8; background:var(--warn-soft); color:var(--warn);
+  border-radius:8px; padding:10px 12px; margin-top:12px; font-size:12.5px; font-weight:600; display:none;
+}
+.arm-note.show { display:block; }
+.arm-note b { font-family:var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="shellHeader"></div>
+
+  <div class="tool-title">
+    <h1>Mortgage Calculator</h1>
+    <div class="deal-import">
+      <select id="dealImport"><option value="">Load from a saved deal…</option></select>
+      <button class="btn" id="pdfBtn" title="Open a print-ready snapshot — choose “Save as PDF” in the print dialog">⬇ PDF</button>
+      <button class="btn" id="emailBtn" title="Send a text snapshot via your email app">✉ Email</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- LEFT: INPUTS -->
+    <div>
+      <div class="card">
+        <h2>Loan <span class="tag">Purchase &amp; terms</span></h2>
+        <div class="body">
+          <div class="row"><label>Home price</label><input class="num" id="price" data-fmt="money" value="350,000"></div>
+          <div class="row"><label>Down payment <span class="sub" id="downHint"></span></label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input class="num small" id="down" data-fmt="raw" value="20">
+              <div class="unit-toggle" id="downToggle">
+                <button type="button" data-u="%" class="on">%</button>
+                <button type="button" data-u="$">$</button>
+              </div>
+            </div>
+          </div>
+          <div class="row"><label>Interest rate</label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input class="num small" id="rate" data-fmt="raw" value="7">
+              <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">%</span>
+            </div>
+          </div>
+          <div class="row"><label>Loan term</label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input class="num small" id="term" data-fmt="raw" value="30">
+              <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">yrs</span>
+            </div>
+          </div>
+          <div class="row">
+            <label>Interest-only <span class="sub">pay only interest for a set period</span></label>
+            <label class="switch"><input type="checkbox" id="ioOn"><span class="sl"></span></label>
+          </div>
+          <div class="fin-sub" id="ioSub">
+            <div class="row"><label>Interest-only period <span class="sub">set equal to the term for a full-term IO loan (balloon at end)</span></label>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <input class="num small" id="io_years" data-fmt="raw" value="10">
+                <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">yrs</span>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <label>ARM <span class="sub">adjustable rate — fixed intro period, then adjusts</span></label>
+            <label class="switch"><input type="checkbox" id="armOn"><span class="sl"></span></label>
+          </div>
+          <div class="fin-sub" id="armSub">
+            <div class="row"><label>Fixed period</label>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <input class="num small" id="arm_fixed" data-fmt="raw" value="7">
+                <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">yrs</span>
+              </div>
+            </div>
+            <div class="row"><label>Adjusts every</label>
+              <select id="arm_freq">
+                <option value="6">6 months</option>
+                <option value="12">12 months</option>
+              </select>
+            </div>
+            <div class="row"><label>Expected rate after adjustment <span class="sub">your estimate of the fully-indexed rate</span></label>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <input class="num small" id="arm_rate" data-fmt="raw" value="8.5">
+                <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">%</span>
+              </div>
+            </div>
+            <div class="row"><label>Structure</label><span id="armLabel" style="font-family:var(--mono); font-weight:600; font-size:13px;">7/6 ARM</span></div>
+          </div>
+          <div class="row" style="border-top:1px dashed var(--line); margin-top:6px; padding-top:11px;">
+            <label>Loan amount</label>
+            <span id="loanOut" style="font-family:var(--mono); font-weight:600; font-size:14px;">—</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Monthly Extras <span class="tag">Escrow &amp; fees</span></h2>
+        <div class="body">
+          <div class="row"><label>Property tax <span class="sub">per year</span></label><input class="num" id="tax" data-fmt="money" value="4,200"></div>
+          <div class="row"><label>Home insurance <span class="sub">per year</span></label><input class="num" id="ins" data-fmt="money" value="1,600"></div>
+          <div class="row"><label>HOA fees <span class="sub">per month</span></label><input class="num" id="hoa" data-fmt="money" value="0"></div>
+          <div class="row"><label>PMI rate <span class="sub">annual % of loan · applies under 20% down, drops at 78% LTV</span></label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input class="num small" id="pmiRate" data-fmt="raw" value="0.5">
+              <span style="font-family:var(--mono); font-size:12px; color:var(--ink-faint)">%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Payoff Faster <span class="tag">Optional</span></h2>
+        <div class="body">
+          <div class="row"><label>Extra payment <span class="sub">added to principal every month</span></label><input class="num" id="extra" data-fmt="money" value="0"></div>
+          <div class="savings-box" id="savingsBox"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: RESULTS -->
+    <div>
+      <div class="card">
+        <h2>Monthly Payment <span class="tag">Breakdown</span></h2>
+        <div class="body">
+          <div class="pay-hero">
+            <div class="ph-num" id="payTotal">—</div>
+            <div class="ph-sub" id="paySub">principal &amp; interest + escrow</div>
+          </div>
+          <div class="comp-bar" id="compBar"></div>
+          <div class="legend" id="legend"></div>
+          <div class="arm-note" id="armNote"></div>
+        </div>
+      </div>
+
+      <div class="tiles" style="margin-top:18px;">
+        <div class="tile hero"><div class="t-label">Total Interest</div><div class="t-value" id="totInt">—</div><div class="t-note" id="totIntNote">over the life of the loan</div></div>
+        <div class="tile"><div class="t-label">Total Cost</div><div class="t-value" id="totCost">—</div><div class="t-note">principal + interest</div></div>
+        <div class="tile"><div class="t-label">Payoff Time</div><div class="t-value" id="payoff">—</div><div class="t-note" id="payoffNote">with current payments</div></div>
+        <div class="tile"><div class="t-label">PMI</div><div class="t-value" id="pmiOut">—</div><div class="t-note" id="pmiNote">monthly, until 78% LTV</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Amortization <span class="tag">Year by year</span></h2>
+        <div class="body am-scroll"><table class="am" id="amTable"></table></div>
+        <p class="footnote" style="padding:0 18px 14px; margin-top:0;">Highlighted row = the year PMI drops off (loan balance reaches 78% of the home price).</p>
+      </div>
+    </div>
+  </div>
+
+  <p class="footnote">Estimates only. Taxes, insurance and PMI vary by property, credit and lender — confirm with your loan officer before committing.</p>
+</div>
+
+<script src="shell.js"></script>
+<script>
+'use strict';
+Shell.mount('mortgage');
+
+const $ = id => document.getElementById(id);
+const money = n => (n<0?'−$':'$') + Math.round(Math.abs(n)).toLocaleString('en-US');
+const money0 = n => '$' + Math.round(Math.abs(n)).toLocaleString('en-US');
+const parseNum = s => { const n = parseFloat(String(s).replace(/[^0-9.\-]/g,'')); return isFinite(n)? n:0; };
+
+const DRAFT = () => Shell.getUser()?.sub ? `mortgage.draft.v1.u.${Shell.getUser().sub}` : 'mortgage.draft.v1';
+const RENTAL_DEALS = () => Shell.getUser()?.sub ? `rentalDeals.v3.u.${Shell.getUser().sub}` : 'rentalDeals.v3';
+
+/* down payment % ↔ $ toggle */
+let downUnit = '%';
+function setDownUnit(u){
+  downUnit = u;
+  document.querySelectorAll('#downToggle button').forEach(b => b.classList.toggle('on', b.dataset.u === u));
+}
+$('downToggle').addEventListener('click', ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  if (downUnit !== b.dataset.u){
+    const price = parseNum($('price').value);
+    const v = parseNum($('down').value);
+    $('down').value = b.dataset.u === '$'
+      ? Math.round(price*v/100)
+      : (price > 0 ? +(v/price*100).toFixed(1) : 0);
+  }
+  setDownUnit(b.dataset.u);
+  calc();
+});
+$('ioOn').addEventListener('change', () => {
+  $('ioSub').classList.toggle('on', $('ioOn').checked);
+  calc();
+});
+$('armOn').addEventListener('change', () => {
+  $('armSub').classList.toggle('on', $('armOn').checked);
+  calc();
+});
+$('arm_freq').addEventListener('change', calc);
+document.querySelectorAll('input.num').forEach(el => {
+  el.addEventListener('input', calc);
+  el.addEventListener('blur', () => {
+    if (el.value.trim() === '') return;
+    const v = parseNum(el.value);
+    if (el.dataset.fmt === 'money') el.value = Math.round(v).toLocaleString('en-US');
+    else el.value = String(v);
+    calc();
+  });
+});
+
+function readState(){
+  const s = {
+    price: parseNum($('price').value),
+    down: parseNum($('down').value),
+    downUnit,
+    io: $('ioOn').checked,
+    rate: parseNum($('rate').value),
+    term: parseNum($('term').value),
+    tax: parseNum($('tax').value),
+    ins: parseNum($('ins').value),
+    hoa: parseNum($('hoa').value),
+    pmiRate: parseNum($('pmiRate').value),
+    extra: parseNum($('extra').value),
+    ioYears: parseNum($('io_years').value),
+    armOn: $('armOn').checked,
+    armFixed: parseNum($('arm_fixed').value),
+    armFreq: parseNum($('arm_freq').value),
+    armRate: parseNum($('arm_rate').value),
+  };
+  s.downAmt = downUnit === '$' ? s.down : s.price * s.down/100;
+  s.downPct = s.price > 0 ? s.downAmt/s.price*100 : 0;
+  return s;
+}
+
+function monthlyPI(loan, ratePct, years){
+  if (loan <= 0 || years <= 0) return 0;
+  const r = ratePct/100/12, n = years*12;
+  if (r === 0) return loan/n;
+  return loan * r / (1 - Math.pow(1+r, -n));
+}
+
+/* Simulate the loan month by month. Returns totals, months to payoff,
+   PMI months, and a per-year schedule. */
+/* Phase-aware loan simulation: optional interest-only period, optional ARM
+   adjustment (re-amortized over the remaining term), extra payments, PMI. */
+function simulate(s, extra){
+  const loan = Math.max(0, s.price - s.downAmt);
+  const termMonths = Math.round(s.term*12);
+  const ioEnd = s.io ? Math.round(Math.min(s.ioYears > 0 ? s.ioYears : s.term, s.term)*12) : 0;
+  const armStart = s.armOn ? Math.min(Math.round(s.armFixed*12), termMonths) : Infinity;
+  const pmiMonthly = (s.downPct < 20 && s.pmiRate > 0) ? loan*s.pmiRate/100/12 : 0;
+  const pmiCutoff = s.price * 0.78;
+
+  let bal = loan, m = 0, pay = 0, totalInterest = 0, totalPMI = 0, pmiEndMonth = 0;
+  let initialPI = 0, adjustedPI = 0, postIOPI = 0;
+  const years = [];
+  let yInt = 0, yPrin = 0;
+
+  while (bal > 0.005 && m < termMonths){
+    m++;
+    const annual = (s.armOn && m > armStart) ? s.armRate : s.rate;
+    const rm = annual/100/12;
+    const isIO = m <= ioEnd;
+    if (isIO) pay = bal * rm;                            /* IO payment tracks balance & current rate */
+    else if (m === 1 || m === ioEnd + 1 || m === armStart + 1)
+      pay = monthlyPI(bal, annual, (termMonths - m + 1)/12);
+    if (m === 1) initialPI = pay;
+    if (m === armStart + 1) adjustedPI = pay;
+    if (ioEnd > 0 && m === ioEnd + 1) postIOPI = pay;
+    const interest = bal * rm;
+    let principal = isIO ? extra : pay - interest + extra;
+    if (!isIO && principal <= 0 && rm > 0){ break; }     /* payment doesn't cover interest */
+    if (principal > bal) principal = bal;
+    bal -= principal;
+    totalInterest += interest;
+    yInt += interest; yPrin += principal;
+    if (pmiMonthly > 0 && bal > pmiCutoff) { totalPMI += pmiMonthly; pmiEndMonth = m; }
+    if (m % 12 === 0 || bal <= 0.005 || m === termMonths){
+      years.push({ y: Math.ceil(m/12), interest: yInt, principal: yPrin, balance: Math.max(0,bal) });
+      yInt = 0; yPrin = 0;
+    }
+  }
+  return { loan, basePI: initialPI, adjustedPI, postIOPI, pmiMonthly, months: m,
+           totalInterest, totalPMI, pmiEndMonth, years, balloon: bal > 0.005 ? bal : 0 };
+}
+
+function fmtYears(months){
+  const y = Math.floor(months/12), mo = months % 12;
+  return mo ? `${y}y ${mo}m` : `${y} yrs`;
+}
+
+function calc(){
+  const s = readState();
+  const base = simulate(s, 0);
+  const withExtra = s.extra > 0 ? simulate(s, s.extra) : base;
+
+  $('downHint').textContent = downUnit === '%'
+    ? `= ${money0(s.downAmt)}`
+    : `= ${(+s.downPct.toFixed(1)).toString()}%`;
+  $('loanOut').textContent = money0(base.loan) + (s.io ? ' · interest-only' : '');
+  const armTag = `${+s.armFixed}/${s.armFreq === 6 ? 6 : 1} ARM`;
+  $('armLabel').textContent = armTag;
+  const escrowM = s.tax/12 + s.ins/12 + s.hoa;
+  const notes = [];
+  if (s.armOn && withExtra.adjustedPI > 0)
+    notes.push(`${armTag}: payment shown is the intro rate (${(+s.rate).toString()}%). At your expected ${(+s.armRate).toString()}% it adjusts to <b>≈ ${money0(withExtra.adjustedPI + escrowM)}/mo</b> starting year ${Math.floor(s.armFixed)+1} — thereafter it can move every ${s.armFreq} months.`);
+  else if (s.armOn)
+    notes.push(`${armTag}: rate adjusts after year ${+s.armFixed} — set an expected adjusted rate to model it.`);
+  if (s.io && withExtra.postIOPI > 0)
+    notes.push(`Interest-only for ${+s.ioYears} yrs — then the payment steps up to <b>≈ ${money0(withExtra.postIOPI + escrowM)}/mo</b> as principal paydown begins.`);
+  else if (s.io && withExtra.balloon > 0)
+    notes.push(`Interest-only for the full term — the entire <b>${money0(withExtra.balloon)}</b> balance is due as a balloon at term end.`);
+  const armNote = $('armNote');
+  armNote.innerHTML = notes.join('<br><br>');
+  armNote.classList.toggle('show', notes.length > 0);
+
+  const taxM = s.tax/12, insM = s.ins/12, hoaM = s.hoa;
+  const pmiM = base.pmiMonthly;
+  const total = base.basePI + taxM + insM + hoaM + pmiM + (s.extra||0);
+  $('payTotal').textContent = money0(total) + '/mo';
+  $('paySub').textContent = s.extra > 0
+    ? `includes ${money0(s.extra)} extra toward principal`
+    : (s.io ? 'interest-only + escrow' : 'principal & interest + escrow');
+
+  /* composition bar + legend */
+  const parts = [
+    [s.io ? 'Interest' : 'P&I', base.basePI + (s.extra||0), 'c-pi'],
+    ['Taxes', taxM, 'c-tax'],
+    ['Insurance', insM, 'c-ins'],
+    pmiM > 0 ? ['PMI', pmiM, 'c-pmi'] : null,
+    hoaM > 0 ? ['HOA', hoaM, 'c-hoa'] : null,
+  ].filter(Boolean);
+  const sum = parts.reduce((t,p)=> t+p[1], 0) || 1;
+  $('compBar').innerHTML = parts.map(p => `<div class="${p[2]}" style="width:${(p[1]/sum*100).toFixed(2)}%"></div>`).join('');
+  $('legend').innerHTML = parts.map(p => `<span class="li"><span class="sw ${p[2]}"></span>${p[0]} <b>${money0(p[1])}</b></span>`).join('');
+
+  /* tiles */
+  $('totInt').textContent = money0(withExtra.totalInterest);
+  $('totIntNote').textContent = s.extra > 0 ? 'with extra payments' : 'over the life of the loan';
+  $('totCost').textContent = money0(base.loan + withExtra.totalInterest);
+  if (withExtra.balloon > 0){
+    $('payoff').textContent = fmtYears(withExtra.months);
+    $('payoffNote').textContent = `balloon of ${money0(withExtra.balloon)} due at term end`;
+  } else {
+    $('payoff').textContent = fmtYears(withExtra.months);
+    $('payoffNote').textContent = s.extra > 0 ? `vs ${fmtYears(base.months)} without extra` : 'with current payments';
+  }
+  $('pmiOut').textContent = pmiM > 0 ? money0(pmiM) : 'None';
+  $('pmiNote').textContent = pmiM > 0
+    ? `≈ ${money0(withExtra.totalPMI)} total, drops ~year ${Math.max(1, Math.ceil(withExtra.pmiEndMonth/12))}`
+    : s.downPct >= 20 ? '20%+ down — no PMI' : 'set a PMI rate to include it';
+
+  /* savings box */
+  const box = $('savingsBox');
+  if (s.extra > 0){
+    const saved = base.totalInterest - withExtra.totalInterest;
+    const cut = base.months - withExtra.months;
+    box.innerHTML = `Paying <b>${money0(s.extra)}/mo</b> extra saves <b>${money0(saved)}</b> in interest and pays the loan off <b>${fmtYears(cut)}</b> sooner.`;
+    box.classList.add('show');
+  } else box.classList.remove('show');
+
+  /* amortization table */
+  const pmiDropYear = withExtra.pmiMonthly > 0 ? Math.ceil(withExtra.pmiEndMonth/12) : 0;
+  $('amTable').innerHTML = `
+    <thead><tr><th>Year</th><th>Principal Paid</th><th>Interest Paid</th><th>Balance</th></tr></thead>
+    <tbody>${withExtra.years.map(y => `
+      <tr class="${y.y === pmiDropYear ? 'milestone':''}">
+        <td>Year ${y.y}</td><td>${money0(y.principal)}</td><td>${money0(y.interest)}</td><td>${money0(y.balance)}</td>
+      </tr>`).join('')}
+    </tbody>`;
+
+  try { localStorage.setItem(DRAFT(), JSON.stringify(s)); } catch {}
+}
+
+/* ---------------- load from a saved rental deal ---------------- */
+function fillDealImport(){
+  let deals = [];
+  try { deals = JSON.parse(localStorage.getItem(RENTAL_DEALS())) || []; } catch {}
+  const sel = $('dealImport');
+  sel.innerHTML = '<option value="">Load from a saved deal…</option>' +
+    deals.map((d,i) => `<option value="${i}">${d.name.replace(/</g,'&lt;')} — ${money0(d.price)}</option>`).join('');
+  sel.onchange = () => {
+    const d = deals[+sel.value];
+    if (!d) return;
+    $('price').value = Math.round(d.price).toLocaleString('en-US');
+    setDownUnit('%');
+    $('down').value = d.downPct;
+    $('rate').value = d.rate;
+    $('term').value = d.term;
+    $('ioOn').checked = !!d.ioOn;
+    calc();
+    Shell.toast(`Loaded "${d.name}" from the Rental Analyzer`);
+  };
+}
+window.addEventListener('shell:user', () => { fillDealImport(); loadDraft(); });
+
+function loadDraft(){
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem(DRAFT())); } catch {}
+  if (!d || !isFinite(d.price)) { calc(); return; }
+  $('price').value = Math.round(d.price).toLocaleString('en-US');
+  $('tax').value = Math.round(d.tax).toLocaleString('en-US');
+  $('ins').value = Math.round(d.ins).toLocaleString('en-US');
+  $('hoa').value = Math.round(d.hoa).toLocaleString('en-US');
+  $('extra').value = Math.round(d.extra).toLocaleString('en-US');
+  $('pmiRate').value = d.pmiRate;
+  setDownUnit(d.downUnit || '%');
+  $('down').value = d.down ?? d.downPct ?? 20;
+  $('rate').value = d.rate;
+  $('term').value = d.term;
+  $('ioOn').checked = !!d.io;
+  $('io_years').value = d.ioYears ?? 10;
+  $('ioSub').classList.toggle('on', !!d.io);
+  $('armOn').checked = !!d.armOn;
+  $('armSub').classList.toggle('on', !!d.armOn);
+  $('arm_fixed').value = d.armFixed ?? 7;
+  $('arm_freq').value = d.armFreq ?? 6;
+  $('arm_rate').value = d.armRate ?? 8.5;
+  calc();
+}
+
+/* ---------------- snapshot: PDF & email ---------------- */
+const REPORT_CSS = `
+  body { font-family: Georgia, 'Times New Roman', serif; color:#222; max-width:720px; margin:36px auto; padding:0 24px; line-height:1.5; }
+  header { border-bottom:3px double #222; padding-bottom:12px; margin-bottom:20px; }
+  h1 { font-size:24px; margin:0; }
+  .meta { color:#666; font-size:13px; margin-top:4px; }
+  h2 { font-size:15px; text-transform:uppercase; letter-spacing:.06em; border-bottom:1px solid #999; padding-bottom:4px; margin:24px 0 8px; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  td, th { padding:6px 4px; border-bottom:1px solid #eee; text-align:left; }
+  td.r, th.r { text-align:right; white-space:nowrap; }
+  tr.total td { font-weight:bold; border-top:1px solid #999; }
+  .big { font-size:26px; font-weight:bold; }
+  .note { margin-top:28px; font-size:11.5px; color:#777; border-top:1px solid #ddd; padding-top:8px; }
+  @media print { body { margin:0 auto; } .noprint { display:none; } }
+  .noprint { margin:18px 0; }
+  .noprint button { font-size:14px; padding:8px 16px; cursor:pointer; }`;
+
+function mortgageSnapshot(){
+  const s = readState();
+  const base = simulate(s, 0);
+  const we = s.extra > 0 ? simulate(s, s.extra) : base;
+  const taxM = s.tax/12, insM = s.ins/12;
+  const total = base.basePI + taxM + insM + s.hoa + base.pmiMonthly + (s.extra||0);
+  const armTag = s.armOn ? ` · ${+s.armFixed}/${s.armFreq===6?6:1} ARM` : '';
+  return {
+    s, base, we, total,
+    title: `Mortgage Snapshot — ${money0(s.price)}${armTag}`,
+    lines: [
+      `Home price: ${money0(s.price)}`,
+      `Down payment: ${money0(s.downAmt)} (${(+s.downPct.toFixed(1))}%)`,
+      `Loan: ${money0(base.loan)} at ${s.rate}% for ${s.term} yrs${s.io?' · interest-only':''}${armTag}`,
+      s.armOn ? `Expected after adjustment: ${s.armRate}% → ≈ ${money0(we.adjustedPI + taxM + insM + s.hoa)}/mo` : null,
+      `Monthly payment: ${money0(total)} (P&I ${money0(base.basePI)} · tax ${money0(taxM)} · ins ${money0(insM)}${base.pmiMonthly?` · PMI ${money0(base.pmiMonthly)}`:''}${s.hoa?` · HOA ${money0(s.hoa)}`:''})`,
+      `Total interest: ${money0(we.totalInterest)} · Payoff: ${fmtYears(we.months)}${we.balloon?` · Balloon due: ${money0(we.balloon)}`:''}`,
+      s.extra > 0 ? `Extra ${money0(s.extra)}/mo saves ${money0(base.totalInterest - we.totalInterest)} and ${fmtYears(base.months - we.months)}` : null,
+    ].filter(Boolean),
+  };
+}
+
+$('pdfBtn').addEventListener('click', () => {
+  const snap = mortgageSnapshot();
+  const { s, base, we } = snap;
+  const date = new Date().toLocaleDateString('en-US', {year:'numeric', month:'long', day:'numeric'});
+  const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${snap.title}</title><style>${REPORT_CSS}</style></head><body>
+    <header><h1>Mortgage Snapshot</h1><div class="meta">Prepared ${date} · Real Estate Investor Toolkit</div></header>
+    <div class="noprint"><button onclick="print()">🖨 Print / Save as PDF</button></div>
+    <h2>Summary</h2>
+    <div class="big">${money0(snap.total)}/mo</div>
+    <table>${snap.lines.map(l => { const i = l.indexOf(':'); return `<tr><td>${l.slice(0,i)}</td><td class="r">${l.slice(i+1).trim()}</td></tr>`; }).join('')}</table>
+    <h2>Amortization — Year by Year</h2>
+    <table><tr><th>Year</th><th class="r">Principal</th><th class="r">Interest</th><th class="r">Balance</th></tr>
+      ${we.years.map(y => `<tr><td>Year ${y.y}</td><td class="r">${money0(y.principal)}</td><td class="r">${money0(y.interest)}</td><td class="r">${money0(y.balance)}</td></tr>`).join('')}
+    </table>
+    <p class="note">Estimates only — confirm taxes, insurance, PMI and rate terms with your lender. Generated by Real Estate Investor Toolkit.</p>
+  </body></html>`;
+  const w = window.open('', '_blank');
+  if (!w){ Shell.toast('Pop-up blocked — allow pop-ups to download the snapshot'); return; }
+  w.document.write(doc); w.document.close();
+  setTimeout(() => { try { w.focus(); w.print(); } catch {} }, 500);
+});
+
+$('emailBtn').addEventListener('click', () => {
+  const snap = mortgageSnapshot();
+  const body = snap.lines.join('\n') + '\n\n— Generated by Real Estate Investor Toolkit';
+  location.href = `mailto:?subject=${encodeURIComponent(snap.title)}&body=${encodeURIComponent(body)}`;
+});
+
+/* init */
+document.querySelectorAll('input').forEach(i => i.setAttribute('autocomplete','off'));
+fillDealImport();
+loadDraft();
+</script>
+</body>
+</html>

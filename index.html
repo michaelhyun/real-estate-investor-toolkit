@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Real Estate Investor Toolkit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<link rel="stylesheet" href="shared.css">
+<style>
+.hero { margin: 26px 0 30px; max-width: 640px; }
+.hero h1 { font-family:var(--display); font-weight:500; font-size:34px; letter-spacing:-.01em; line-height:1.15; }
+.hero h1 em { font-style:normal; color:var(--accent); }
+.hero p { color:var(--ink-soft); font-size:15px; margin-top:10px; line-height:1.55; }
+.tool-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px; }
+.tool-card {
+  display:block; text-decoration:none; color:var(--ink);
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow); padding:20px 20px 18px; position:relative; overflow:hidden;
+  transition: transform .15s, border-color .15s;
+}
+.tool-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:var(--accent); }
+.tool-card:hover { transform:translateY(-2px); border-color:var(--accent); }
+.tool-card .ic { font-size:26px; }
+.tool-card h3 { font-family:var(--display); font-size:17px; font-weight:600; margin:10px 0 4px; }
+.tool-card p { font-size:12.5px; color:var(--ink-soft); line-height:1.5; }
+.tool-card .go { display:inline-block; margin-top:12px; font-size:12.5px; font-weight:700; color:var(--accent-strong); }
+.tool-card.soon { opacity:.65; pointer-events:none; }
+.tool-card.soon::before { background:var(--line-strong); }
+.tool-card.soon .badge {
+  position:absolute; top:12px; right:12px; font-family:var(--mono); font-size:9.5px; font-weight:600;
+  letter-spacing:.06em; text-transform:uppercase; background:var(--warn-soft); color:var(--warn);
+  border-radius:99px; padding:3px 8px;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="shellHeader"></div>
+
+  <div class="hero">
+    <h1>Analyze deals like a pro, <em>in minutes</em></h1>
+    <p>A growing toolkit for real-estate investors — underwrite rentals, size up financing, and keep every deal you've looked at in one place.</p>
+  </div>
+
+  <div class="tool-grid">
+    <a class="tool-card" href="rental.html">
+      <div class="ic">🏘️</div>
+      <h3>Rental Property Analyzer</h3>
+      <p>Cash flow, cash-on-cash return, DSCR, creative financing, a 5-year pro-forma, and a contractor-ready scope of work.</p>
+      <span class="go">Open tool →</span>
+    </a>
+    <a class="tool-card" href="mortgage.html">
+      <div class="ic">🏦</div>
+      <h3>Mortgage Calculator</h3>
+      <p>Full monthly payment breakdown with taxes, insurance and PMI, an amortization schedule, and extra-payment payoff savings.</p>
+      <span class="go">Open tool →</span>
+    </a>
+    <a class="tool-card" href="portfolio.html">
+      <div class="ic">📊</div>
+      <h3>Portfolio ROE Dashboard</h3>
+      <p>Every rental you own in one view — cash-on-cash, return on equity, a performance leaderboard, and lazy-equity alerts.</p>
+      <span class="go">Open tool →</span>
+    </a>
+    <div class="tool-card soon">
+      <span class="badge">Coming soon</span>
+      <div class="ic">🛠️</div>
+      <h3>More tools</h3>
+      <p>BRRRR analyzer, flip calculator, rent comps and more — the toolkit keeps growing.</p>
+    </div>
+  </div>
+
+  <p class="footnote">Tools are estimates for screening purposes only — always verify numbers locally before making offers.</p>
+</div>
+
+<script src="shell.js"></script>
+<script>Shell.mount(null);</script>
+</body>
+</html>
