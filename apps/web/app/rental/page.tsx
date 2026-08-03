@@ -12,7 +12,8 @@ import {
   SOW_SECTIONS, money, money0, pct, stripZeros, parseNum, fmtMoneyInput,
   type DealState, type SowItem,
 } from '@reit/core';
-import { Card, NumInput, Switch, UnitToggle, Tile, SliderRow, loadJSON, saveJSON, openReportWindow, REPORT_CSS, escapeHtml } from '../../components/ui';
+import { Card, NumInput, Switch, UnitToggle, Tile, SliderRow, loadJSON, saveJSON, openReportWindow, escapeHtml } from '../../components/ui';
+import { buildRentalReport } from '../../components/report';
 import { toast } from '../../components/toast';
 
 const STORE_KEY = 'rentalDeals.v3';
@@ -116,7 +117,16 @@ export default function RentalPage() {
   /* rehab locks to the Scope of Work total while items exist */
   const sowTotal = s.sow.reduce((t, i) => t + (i.cost || 0), 0);
   const sowLocked = s.sow.length > 0;
-  const eff = useMemo<DealState>(() => sowLocked ? { ...s, rehab: sowTotal } : s, [s, sowLocked, sowTotal]);
+
+  /* 100% down is an all-cash purchase: there is no loan to describe, so the
+     whole financing section switches off. The toggles are neutralized in the
+     computed state only — `s` keeps every setting, so easing the slider back
+     below 100% restores the stack exactly as it was. */
+  const allCash = s.downPct >= 100;
+  const eff = useMemo<DealState>(() => {
+    const base = sowLocked ? { ...s, rehab: sowTotal } : s;
+    return allCash ? { ...base, ioOn: false, armOn: false, sellerOn: false, subtoOn: false } : base;
+  }, [s, sowLocked, sowTotal, allCash]);
   const r = useMemo(() => compute(eff), [eff]);
 
   /* draft persists on every change, like the original calc() */
@@ -206,7 +216,7 @@ export default function RentalPage() {
   const linkCount = (s.prop.video.trim() ? 1 : 0) + s.prop.urls.filter(u => u.url.trim()).length;
 
   /* ---------- verdict ---------- */
-  let vCls: string, vTitle: string, vSub: string;
+  let vCls: 'good' | 'ok' | 'bad', vTitle: string, vSub: string;
   if (r.cashFlow >= 0 && r.coc >= 8) {
     vCls = 'good'; vTitle = 'Strong deal by your numbers';
     vSub = `${pct(r.coc, 1)} cash-on-cash with ${money(r.cashFlow)}/mo cash flow — above the common 8% CoC target.`;
@@ -223,20 +233,20 @@ export default function RentalPage() {
 
   /* ---------- financing summary rows ---------- */
   const finParts: [string, number][] = ([
-    ['Down payment', r.downAmt],
-    s.subtoOn ? ['Subject-to mortgage', r.subtoBal] : null,
-    s.sellerOn ? ['Seller financing', r.sellerAmt] : null,
-    ['New loan (bank)', r.newLoan],
+    [allCash ? 'Down payment — all cash' : 'Down payment', r.downAmt],
+    eff.subtoOn ? ['Subject-to mortgage', r.subtoBal] : null,
+    eff.sellerOn ? ['Seller financing', r.sellerAmt] : null,
+    allCash ? null : ['New loan (bank)', r.newLoan],
   ].filter(Boolean)) as [string, number][];
   const piParts: [string, number][] = ([
-    r.piBank > 0 ? [`New loan ${s.ioOn ? '(interest-only)' : 'P&I'}`, r.piBank] : null,
+    r.piBank > 0 ? [`New loan ${eff.ioOn ? '(interest-only)' : 'P&I'}`, r.piBank] : null,
     r.piSeller > 0 ? [`Seller ${s.sellerType === 'io' ? '(interest-only)' : 'P&I'}`, r.piSeller] : null,
     r.piSub > 0 ? ['Subject-to P&I', r.piSub] : null,
   ].filter(Boolean)) as [string, number][];
   const armTag = `${+s.armFixed}/${s.armFreq === 6 ? 6 : 1} ARM`;
 
   const debtRows: [string, number][] = ([
-    r.piBank > 0 ? [`New loan ${s.ioOn ? '(interest-only)' : 'P&I'}`, r.piBank] : null,
+    r.piBank > 0 ? [`New loan ${eff.ioOn ? '(interest-only)' : 'P&I'}`, r.piBank] : null,
     r.piSeller > 0 ? [`Seller financing ${s.sellerType === 'io' ? '(interest-only)' : ''}`, r.piSeller] : null,
     r.piSub > 0 ? ['Subject-to payment', r.piSub] : null,
   ].filter(Boolean)) as [string, number][];
@@ -417,53 +427,10 @@ export default function RentalPage() {
   }
 
   function pdf() {
-    const name = s.name || 'Untitled deal';
-    const kv = snapshotKV();
-    const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    const expRows = r.expLines.filter(e => e.monthly)
-      .map(e => `<tr><td>${e.label}</td><td class="r">−${money0(e.monthly)}</td></tr>`).join('') +
-      (r.utilTotal ? `<tr><td>Utilities</td><td class="r">−${money0(r.utilTotal)}</td></tr>` : '');
-    const finRows = finParts.map(([l, v]) => `<tr><td>${l}</td><td class="r">${money0(v)}</td></tr>`).join('');
-    const hood = s.hood || { crime: '', schools: '', notes: '' };
-    const capexRows = (s.capex || []).filter((c: any) => (c.name || '').trim() && (String(c.year || '').trim() || c.cond || (c.notes || '').trim()));
-    const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Deal Report — ${escapeHtml(name)}</title><style>${REPORT_CSS}</style></head><body>
-      <header><h1>${escapeHtml(name)}</h1>
-        <div class="meta">${escapeHtml(s.prop.address || '')}${s.prop.address ? ' · ' : ''}Prepared ${date} · Real Estate Investor Toolkit</div></header>
-      <div class="noprint"><button onclick="print()">🖨 Print / Save as PDF</button></div>
-      <div class="verdict">${escapeHtml(vTitle)}</div>
-      <h2>Key Numbers</h2>
-      <table>${kv.map(([k, v]) => `<tr><td>${k}</td><td class="r">${v}</td></tr>`).join('')}</table>
-      <h2>Monthly Cash Flow — Year 1</h2>
-      <table>
-        <tr><td>Gross rent</td><td class="r">${money0(s.rent)}</td></tr>
-        ${r.otherIncTotal ? `<tr><td>Other income</td><td class="r">${money0(r.otherIncTotal)}</td></tr>` : ''}
-        <tr><td>Vacancy (${s.vacancy}%)</td><td class="r">−${money0(r.vacLoss)}</td></tr>
-        ${expRows}
-        <tr class="total"><td>Net operating income</td><td class="r">${money(r.noi)}</td></tr>
-        <tr><td>Debt service</td><td class="r">−${money0(r.pi)}</td></tr>
-        <tr class="total"><td>Cash flow</td><td class="r">${money(r.cashFlow)}</td></tr>
-      </table>
-      <h2>Financing Stack</h2>
-      <table>${finRows}<tr class="total"><td>Total = purchase price</td><td class="r">${money0(r.downAmt + r.subtoBal + r.sellerAmt + r.newLoan)}</td></tr></table>
-      <h2>5-Year Pro-Forma</h2>
-      <table><tr><th>Year</th><th class="r">NOI</th><th class="r">Cash Flow</th><th class="r">Value</th><th class="r">Equity</th></tr>
-        ${r.years.map(y => `<tr><td>Year ${y.y}</td><td class="r">${money0(y.yNOI)}</td><td class="r">${money(y.yCF)}</td><td class="r">${money0(y.value)}</td><td class="r">${money0(y.equity)}</td></tr>`).join('')}
-      </table>
-      ${s.sow.length ? `<h2>Rehab — Scope of Work</h2><table>${SOW_SECTIONS.map(sec => {
-        const t = s.sow.filter(i => i.sec === sec.id).reduce((a, i) => a + (i.cost || 0), 0);
-        return t ? `<tr><td>${sec.label}</td><td class="r">${money0(t)}</td></tr>` : '';
-      }).join('')}<tr class="total"><td>Total rehab budget</td><td class="r">${money0(sowTotal)}</td></tr></table>` : ''}
-      ${capexRows.length ? `<h2>Capital Expenditures — Condition</h2><table>
-        <tr><th>Item</th><th class="r">Installed</th><th class="r">Condition</th><th>Notes</th></tr>
-        ${capexRows.map((c: any) => `<tr><td>${escapeHtml(c.name)}</td><td class="r">${escapeHtml(String(c.year || '—'))}</td><td class="r">${escapeHtml(c.cond || '—')}</td><td>${escapeHtml(c.notes || '')}</td></tr>`).join('')}
-      </table>` : ''}
-      ${(hood.crime || hood.schools || hood.notes) ? `<h2>Neighborhood Notes</h2><table>
-        ${hood.crime ? `<tr><td>Crime level</td><td class="r">${escapeHtml(hood.crime)}</td></tr>` : ''}
-        ${hood.schools ? `<tr><td>Schools rating</td><td class="r">${escapeHtml(hood.schools)}</td></tr>` : ''}
-        ${hood.notes ? `<tr><td colspan="2">${escapeHtml(hood.notes)}</td></tr>` : ''}
-      </table>` : ''}
-      <p class="note">Estimates for screening purposes only — verify taxes, insurance, rents and rehab costs locally before making offers. Generated by Real Estate Investor Toolkit.</p>
-    </body></html>`;
+    const doc = buildRentalReport({
+      s: eff, r, sowTotal,
+      verdict: { cls: vCls, title: vTitle, sub: vSub },
+    });
     openReportWindow(doc, '', () => toast('Pop-up blocked — allow pop-ups to open the report'));
   }
 
@@ -660,7 +627,8 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
               <div className="row"><label>Purchase price</label>
                 <NumInput value={s.price} onChange={v => set('price', v)} /></div>
               <SliderRow label="Down payment" min={0} max={100} step={1} value={s.downPct}
-                onChange={v => set('downPct', v)} output={`${s.downPct}% · ${money0(r.downAmt)}`} />
+                onChange={v => set('downPct', v)}
+                output={allCash ? `100% · ${money0(r.downAmt)} — all cash` : `${s.downPct}% · ${money0(r.downAmt)}`} />
               <div className="row"><label>Rehab / initial repairs <span className="sub">{sowLocked ? 'synced from Scope of Work' : 'enter manually, or build a Scope of Work'}</span></label>
                 <NumInput value={eff.rehab} onChange={v => set('rehab', v)} readOnly={sowLocked} /></div>
               <div className="row"><label>Closing costs <span className="sub">{s.closingUnit === '%' ? `= ${money0(r.closingAmt)}` : ''}</span></label>
@@ -679,82 +647,93 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
               </div>
             </Card>
 
-            <Card dense title="Financing" tag="Stack">
+            <Card dense title="Financing" tag={allCash ? 'All cash' : 'Stack'}>
+              {allCash && (
+                <div className="fin-note">
+                  <span className="ic" aria-hidden="true">💵</span>
+                  <span><b>All-cash purchase — financing is off</b>
+                    <span>You&apos;re covering the full {money0(s.price)} with your own money, so there is no loan to
+                      describe. Drag the down payment below 100% to bring the loan, ARM and creative-financing
+                      options back — your settings are kept exactly as they were.</span></span>
+                </div>
+              )}
+              <fieldset className={`fin-fields${allCash ? ' locked' : ''}`} disabled={allCash}>
               <div className="row"><label>New loan — interest rate</label>
                 <div className="inline-input">
-                  <NumInput value={s.rate} onChange={v => set('rate', v)} fmt="raw" small />
+                  <NumInput value={s.rate} onChange={v => set('rate', v)} fmt="raw" small disabled={allCash} />
                   <span className="unit-suffix">%</span>
                 </div>
               </div>
               <div className="row"><label>New loan — term</label>
                 <div className="inline-input">
-                  <NumInput value={s.term} onChange={v => set('term', v)} fmt="raw" small />
+                  <NumInput value={s.term} onChange={v => set('term', v)} fmt="raw" small disabled={allCash} />
                   <span className="unit-suffix">yrs</span>
                 </div>
               </div>
               <div className="row">
                 <label>Interest-only <span className="sub">pay only interest for a set period</span></label>
-                <Switch checked={s.ioOn} onChange={v => set('ioOn', v)} />
+                <Switch checked={eff.ioOn} onChange={v => set('ioOn', v)} disabled={allCash} />
               </div>
-              <div className={`fin-sub${s.ioOn ? ' on' : ''}`}>
+              <div className={`fin-sub${eff.ioOn ? ' on' : ''}`}>
                 <div className="row"><label>Interest-only period <span className="sub">set equal to the term for full-term IO (balloon)</span></label>
                   <div className="inline-input">
-                    <NumInput value={s.ioYears} onChange={v => set('ioYears', v)} fmt="raw" small />
+                    <NumInput value={s.ioYears} onChange={v => set('ioYears', v)} fmt="raw" small disabled={allCash} />
                     <span className="unit-suffix">yrs</span>
                   </div>
                 </div>
               </div>
               <div className="row">
                 <label>ARM <span className="sub">adjustable rate — fixed intro period, then adjusts</span></label>
-                <Switch checked={s.armOn} onChange={v => set('armOn', v)} />
+                <Switch checked={eff.armOn} onChange={v => set('armOn', v)} disabled={allCash} />
               </div>
-              <div className={`fin-sub${s.armOn ? ' on' : ''}`}>
+              <div className={`fin-sub${eff.armOn ? ' on' : ''}`}>
                 <div className="row"><label>Fixed period</label>
                   <div className="inline-input">
-                    <NumInput value={s.armFixed} onChange={v => set('armFixed', v)} fmt="raw" small />
+                    <NumInput value={s.armFixed} onChange={v => set('armFixed', v)} fmt="raw" small disabled={allCash} />
                     <span className="unit-suffix">yrs</span>
                   </div>
                 </div>
                 <div className="row"><label>Adjusts every</label>
-                  <select value={s.armFreq} onChange={ev => set('armFreq', +ev.target.value)}>
+                  <select value={s.armFreq} disabled={allCash} onChange={ev => set('armFreq', +ev.target.value)}>
                     <option value={6}>6 months</option>
                     <option value={12}>12 months</option>
                   </select>
                 </div>
                 <div className="row"><label>Expected rate after adjustment</label>
                   <div className="inline-input">
-                    <NumInput value={s.armRate} onChange={v => set('armRate', v)} fmt="raw" small />
+                    <NumInput value={s.armRate} onChange={v => set('armRate', v)} fmt="raw" small disabled={allCash} />
                     <span className="unit-suffix">%</span>
                   </div>
                 </div>
                 <div className="row"><label>Structure</label><span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 13 }}>{armTag}</span></div>
               </div>
 
-              <details className="collapse" open={creativeOpen} onToggle={ev => setCreativeOpen((ev.target as HTMLDetailsElement).open)}>
+              <details className="collapse" open={allCash ? false : creativeOpen}
+                onToggle={ev => { if (!allCash) setCreativeOpen((ev.target as HTMLDetailsElement).open); }}>
                 <summary><span><span className="chev">▶</span>&nbsp; Creative financing</span>
-                  <span className="sum-val">{(s.sellerOn || s.subtoOn) ? money0(r.sellerAmt + r.subtoBal) + ' carried' : 'off'}</span></summary>
+                  <span className="sum-val">{allCash ? 'n/a — all cash' : (s.sellerOn || s.subtoOn) ? money0(r.sellerAmt + r.subtoBal) + ' carried' : 'off'}</span></summary>
                 <div className="inner">
                   <div className="row" style={{ paddingBottom: 2 }}>
                     <label><strong style={{ color: 'var(--ink)' }}>Seller financing</strong></label>
-                    <Switch checked={s.sellerOn} onChange={v => set('sellerOn', v)} />
+                    <Switch checked={eff.sellerOn} onChange={v => set('sellerOn', v)} disabled={allCash} />
                   </div>
-                  <div className={`fin-sub${s.sellerOn ? ' on' : ''}`}>
+                  <div className={`fin-sub${eff.sellerOn ? ' on' : ''}`}>
                     <div className="row"><label>Amount carried</label>
-                      <NumInput value={s.sellerAmt} onChange={v => set('sellerAmt', v)} /></div>
+                      <NumInput value={s.sellerAmt} onChange={v => set('sellerAmt', v)} disabled={allCash} /></div>
                     <div className="row"><label>Interest rate</label>
                       <div className="inline-input">
-                        <NumInput value={s.sellerRate} onChange={v => set('sellerRate', v)} fmt="raw" small />
+                        <NumInput value={s.sellerRate} onChange={v => set('sellerRate', v)} fmt="raw" small disabled={allCash} />
                         <span className="unit-suffix">%</span>
                       </div>
                     </div>
                     <div className="row"><label>Term</label>
                       <div className="inline-input">
-                        <NumInput value={s.sellerTerm} onChange={v => set('sellerTerm', v)} fmt="raw" small />
+                        <NumInput value={s.sellerTerm} onChange={v => set('sellerTerm', v)} fmt="raw" small disabled={allCash} />
                         <span className="unit-suffix">yrs</span>
                       </div>
                     </div>
                     <div className="row"><label>Payment type</label>
-                      <select value={s.sellerType} onChange={ev => set('sellerType', ev.target.value as 'am' | 'io')}>
+                      <select value={s.sellerType} disabled={allCash} onChange={ev => set('sellerType', ev.target.value as 'am' | 'io')}>
                         <option value="am">Amortizing</option>
                         <option value="io">Interest-only</option>
                       </select>
@@ -762,38 +741,40 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
                   </div>
                   <div className="row" style={{ paddingBottom: 2 }}>
                     <label><strong style={{ color: 'var(--ink)' }}>Subject-to <span className="sub">take over existing mortgage</span></strong></label>
-                    <Switch checked={s.subtoOn} onChange={v => set('subtoOn', v)} />
+                    <Switch checked={eff.subtoOn} onChange={v => set('subtoOn', v)} disabled={allCash} />
                   </div>
-                  <div className={`fin-sub${s.subtoOn ? ' on' : ''}`}>
+                  <div className={`fin-sub${eff.subtoOn ? ' on' : ''}`}>
                     <div className="row"><label>Existing balance</label>
-                      <NumInput value={s.subtoBal} onChange={v => set('subtoBal', v)} /></div>
+                      <NumInput value={s.subtoBal} onChange={v => set('subtoBal', v)} disabled={allCash} /></div>
                     <div className="row"><label>Interest rate</label>
                       <div className="inline-input">
-                        <NumInput value={s.subtoRate} onChange={v => set('subtoRate', v)} fmt="raw" small />
+                        <NumInput value={s.subtoRate} onChange={v => set('subtoRate', v)} fmt="raw" small disabled={allCash} />
                         <span className="unit-suffix">%</span>
                       </div>
                     </div>
                     <div className="row"><label>Remaining term</label>
                       <div className="inline-input">
-                        <NumInput value={s.subtoTerm} onChange={v => set('subtoTerm', v)} fmt="raw" small />
+                        <NumInput value={s.subtoTerm} onChange={v => set('subtoTerm', v)} fmt="raw" small disabled={allCash} />
                         <span className="unit-suffix">yrs</span>
                       </div>
                     </div>
                   </div>
                 </div>
               </details>
+              </fieldset>
 
               <div className="fin-summary">
                 {finParts.map(([l, v]) => <div className="row" key={l}><label>{l}</label><span className="val">{money0(v)}</span></div>)}
                 <div className="row total"><label>Total = purchase price</label>
                   <span className={`val${r.overBy <= 0 ? ' fin-ok' : ''}`}>{money0(r.downAmt + r.subtoBal + r.sellerAmt + r.newLoan)}{r.overBy <= 0 ? ' ✓' : ''}</span></div>
-                <div className="row debt-total"><label>Total monthly debt service</label><span className="val">{money0(r.pi)}/mo</span></div>
+                <div className="row debt-total"><label>Total monthly debt service</label>
+                  <span className="val">{allCash ? '$0/mo — debt-free' : `${money0(r.pi)}/mo`}</span></div>
                 {piParts.length > 1 && piParts.map(([l, v]) =>
                   <div className="row" key={l}><label style={{ paddingLeft: 10 }}>↳ {l}</label><span className="val">{money0(v)}</span></div>)}
-                {s.armOn && r.payAfterArm > 0 &&
+                {eff.armOn && r.payAfterArm > 0 &&
                   <div className="row"><label style={{ paddingLeft: 10, color: 'var(--warn)' }}>↳ {armTag} — adjusts in year {Math.floor(s.armFixed) + 1}</label>
                     <span className="val" style={{ color: 'var(--warn)' }}>≈ {money0(r.payAfterArm + r.piSeller + r.piSub)}/mo</span></div>}
-                {s.ioOn && s.ioYears > 0 && s.ioYears < s.term && r.payAfterIO > 0 &&
+                {eff.ioOn && s.ioYears > 0 && s.ioYears < s.term && r.payAfterIO > 0 &&
                   <div className="row"><label style={{ paddingLeft: 10, color: 'var(--warn)' }}>↳ IO ends year {+s.ioYears} — payment steps up</label>
                     <span className="val" style={{ color: 'var(--warn)' }}>≈ {money0(r.payAfterIO + r.piSeller + r.piSub)}/mo</span></div>}
               </div>

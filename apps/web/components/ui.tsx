@@ -8,7 +8,7 @@ import { parseNum, fmtMoneyInput } from '@reit/core';
    the parsed number, reformat from the numeric value on blur. */
 export function NumInput({
   value, onChange, fmt = 'money', small = false, className = '',
-  readOnly = false, placeholder, width, textAlignLeft = false,
+  readOnly = false, disabled = false, placeholder, width, textAlignLeft = false,
 }: {
   value: number;
   onChange: (n: number) => void;
@@ -16,6 +16,7 @@ export function NumInput({
   small?: boolean;
   className?: string;
   readOnly?: boolean;
+  disabled?: boolean;
   placeholder?: string;
   width?: number;
   textAlignLeft?: boolean;
@@ -33,6 +34,7 @@ export function NumInput({
       style={{ ...(width ? { width } : {}), ...(textAlignLeft ? { textAlign: 'left' } : {}) }}
       value={text}
       readOnly={readOnly}
+      disabled={disabled}
       placeholder={placeholder}
       inputMode="decimal"
       autoComplete="off"
@@ -81,10 +83,13 @@ export function UnitToggle({
 }
 
 /* ---------- on/off switch ---------- */
-export function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+export function Switch({
+  checked, onChange, disabled = false,
+}: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <label className="switch">
-      <input type="checkbox" checked={checked} onChange={ev => onChange(ev.target.checked)} />
+    <label className={`switch${disabled ? ' disabled' : ''}`}>
+      <input type="checkbox" checked={checked} disabled={disabled}
+        onChange={ev => onChange(ev.target.checked)} />
       <span className="sl" />
     </label>
   );
