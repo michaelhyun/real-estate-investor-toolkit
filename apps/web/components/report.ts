@@ -152,7 +152,16 @@ export interface ReportInput {
 }
 
 export function buildRentalReport({ s, r, verdict }: ReportInput): string {
-  const name = s.name?.trim() || 'Untitled deal';
+  /* the address is the deal title, so it heads the sheet and never repeats in
+     the sub-line; older deals saved under a free-text name fall back to it */
+  const addr = s.prop.address?.trim() || '';
+  const name = addr || s.name?.trim() || 'Untitled deal';
+  /* The title is a full street address, so it can be long — and the masthead
+     clamps to one line to protect the page budget, which would clip it. Size it
+     to fit instead. Measured: the report serif runs ~0.534px per character per
+     px of font size, and the h1 gets 591px beside the verdict pill, so
+     591 / 0.534 ≈ 1107; 1080 leaves a little slack. */
+  const titlePx = Math.min(22, Math.max(11, Math.floor(1080 / Math.max(1, name.length))));
   const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   const gross = r.gross;
   const capRate = (s.price + s.rehab) > 0 ? r.noi * 12 / (s.price + s.rehab) * 100 : NaN;
@@ -294,8 +303,8 @@ export function buildRentalReport({ s, r, verdict }: ReportInput): string {
   <header class="mast">
     <div>
       <div class="brand">Rental Property Analysis · Real Estate Investor Toolkit</div>
-      <h1>${escapeHtml(name)}</h1>
-      <div class="sub">${s.prop.address ? `<b>${escapeHtml(s.prop.address)}</b>` : ''}${s.prop.address && facts ? ' · ' : ''}${facts}${(s.prop.address || facts) ? ' · ' : ''}Prepared ${date}</div>
+      <h1 style="font-size:${titlePx}px">${escapeHtml(name)}</h1>
+      <div class="sub">${facts}${facts ? ' · ' : ''}Prepared ${date}</div>
     </div>
     <span class="pill p-${verdict.cls}">${verdict.cls === 'good' ? 'Strong' : verdict.cls === 'ok' ? 'Marginal' : 'Negative'}</span>
   </header>

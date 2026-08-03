@@ -9,20 +9,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   compute, defaultDealState, EXPENSES, UTILS, UTIL_LABELS, OTHER_INC, OTHER_INC_LABELS,
-  SOW_SECTIONS, money, money0, pct, stripZeros, parseNum, fmtMoneyInput,
+  SOW_SECTIONS, money, money0, pct, stripZeros, parseNum,
   type DealState, type SowItem,
 } from '@reit/core';
 import { Card, NumInput, Switch, UnitToggle, Tile, SliderRow, loadJSON, saveJSON, openReportWindow, escapeHtml } from '../../components/ui';
 import { buildRentalReport } from '../../components/report';
+import { AddressInput } from '../../components/AddressInput';
 import { toast } from '../../components/toast';
 
 const STORE_KEY = 'rentalDeals.v3';
 const DRAFT_KEY = 'rentalCalc.draft.v3';
-
-const SLIDER_BOUNDS: Record<string, [number, number]> = {
-  downPct: [0, 100], vacancy: [0, 20], rentGrowth: [0, 10],
-  expGrowth: [0, 10], appr: [0, 10], sellCost: [0, 12],
-};
 
 /* merge a stored deal/draft into a full DealState with the original fallbacks */
 function normalizeDeal(d: any): DealState {
@@ -58,7 +54,9 @@ function normalizeDeal(d: any): DealState {
     capex: Array.isArray(d.capex) ? d.capex : [],
     hood: { crime: d.hood?.crime || '', schools: d.hood?.schools || '', notes: d.hood?.notes || '' },
     prop: {
-      address: d.prop?.address || '', beds: d.prop?.beds || '', baths: d.prop?.baths || '',
+      /* the address is the deal title now — deals saved under the old model had
+         a separate free-text name, so fall back to it rather than show nothing */
+      address: d.prop?.address || d.name || '', beds: d.prop?.beds || '', baths: d.prop?.baths || '',
       sqft: d.prop?.sqft || '', year: d.prop?.year || '', list: d.prop?.list || 0,
       video: d.prop?.video || '', urls: (d.prop?.urls || []).map((u: any) => ({ label: u.label || '', url: u.url || '' })),
     },
@@ -88,8 +86,8 @@ export default function RentalPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [savedDeals, setSavedDeals] = useState<DealState[]>([]);
   const [hydrated, setHydrated] = useState(false);
-  const nameRef = useRef<HTMLSpanElement>(null);
   const menuWrapRef = useRef<HTMLDivElement>(null);
+  const addrRef = useRef<HTMLDivElement>(null);
 
   /* ---------- hydrate: draft + saved deals ---------- */
   useEffect(() => {
@@ -98,7 +96,6 @@ export default function RentalPage() {
       const d = normalizeDeal(draft);
       setS(d);
       setCreativeOpen(!!(d.sellerOn || d.subtoOn));
-      syncName(d.name);
     }
     setSavedDeals((loadJSON<any[]>(STORE_KEY) || []).map(normalizeDeal));
     setHydrated(true);
@@ -135,18 +132,14 @@ export default function RentalPage() {
   const set = <K extends keyof DealState>(k: K, v: DealState[K]) => setS(prev => ({ ...prev, [k]: v }));
   const setProp = (k: keyof DealState['prop'], v: any) => setS(prev => ({ ...prev, prop: { ...prev.prop, [k]: v } }));
 
-  /* contentEditable deal name — sync DOM only when not focused (no caret jumps) */
-  function syncName(name: string) {
-    requestAnimationFrame(() => {
-      if (nameRef.current && document.activeElement !== nameRef.current)
-        nameRef.current.textContent = name;
-    });
-  }
+  /* The address IS the title, so it doubles as the key a deal saves under. */
+  const setAddress = (v: string) =>
+    setS(prev => ({ ...prev, name: v.trim(), prop: { ...prev.prop, address: v } }));
+  const dealTitle = (d: DealState) => d.prop.address?.trim() || d.name || 'Untitled';
 
   function applyDeal(d: DealState) {
     setS(d);
     setCreativeOpen(!!(d.sellerOn || d.subtoOn));
-    syncName(d.name);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -154,14 +147,14 @@ export default function RentalPage() {
     localStorage.removeItem(DRAFT_KEY);
     applyDeal(defaultDealState());
     setMenuOpen(false);
-    toast('Fresh sheet — name it and start underwriting');
+    toast('Fresh sheet — enter the property address to start');
   }
 
   function saveDeal() {
     if (!s.name.trim()) {
       setTab('analyzer');
-      nameRef.current?.focus();
-      toast('Give the deal a name first — tap the title to edit it');
+      addrRef.current?.querySelector('input')?.focus();
+      toast('Enter the property address first — it names the deal');
       return;
     }
     const deal: DealState = { ...eff, savedAt: new Date().toISOString() };
@@ -196,15 +189,11 @@ export default function RentalPage() {
       chips.push({ html: 'Zillow ↗', href: 'https://www.zillow.com/homes/' + enc + '_rb/' });
       chips.push({ html: 'Realtor ↗', href: 'https://www.realtor.com/search?query=' + enc });
     }
-    const beds = parseNum(p.beds), baths = parseNum(p.baths);
-    if (beds || baths) chips.push({ html: <><b>{beds || '—'}</b> bd · <b>{baths || '—'}</b> ba</> });
+    /* beds/baths/sqft/year/list are editable fields in the header now, so the
+       chips carry only what they don't already show: links and derived math */
     const sqft = parseNum(p.sqft);
-    if (sqft) chips.push({ html: <><b>{Math.round(sqft).toLocaleString('en-US')}</b> sqft</> });
-    if (parseNum(p.year)) chips.push({ html: <>built <b>{Math.round(parseNum(p.year))}</b></> });
-    if (p.list > 0) {
-      chips.push({ html: <>listed <b>{money0(p.list)}</b></> });
-      if (sqft) chips.push({ html: <><b>${Math.round(p.list / sqft)}</b>/sqft</> });
-    }
+    const basis = p.list > 0 ? p.list : s.price;
+    if (sqft && basis > 0) chips.push({ html: <><b>${Math.round(basis / sqft)}</b>/sqft</> });
     if (p.video.trim()) chips.push({ html: '▶ Video tour', href: normUrl(p.video), link: true });
     p.urls.forEach(u => {
       if (!u.url.trim()) return;
@@ -213,7 +202,6 @@ export default function RentalPage() {
       chips.push({ html: name + ' ↗', href: normUrl(u.url), link: true });
     });
   }
-  const linkCount = (s.prop.video.trim() ? 1 : 0) + s.prop.urls.filter(u => u.url.trim()).length;
 
   /* ---------- verdict ---------- */
   let vCls: 'good' | 'ok' | 'bad', vTitle: string, vSub: string;
@@ -251,195 +239,13 @@ export default function RentalPage() {
     r.piSub > 0 ? ['Subject-to payment', r.piSub] : null,
   ].filter(Boolean)) as [string, number][];
 
-  /* ---------- voice fill (Web Speech API) ---------- */
-  const [voiceMode, setVoiceMode] = useState<'closed' | 'listening' | 'done'>('closed');
-  const [voiceFinal, setVoiceFinal] = useState('');
-  const [voiceInterim, setVoiceInterim] = useState('');
-  const [voiceApplied, setVoiceApplied] = useState<[string, string][]>([]);
-  const recogRef = useRef<any>(null);
-  const cancelledRef = useRef(false);
-  const finalRef = useRef('');
-
-  function grabNum(text: string, fromIdx: number) {
-    const win = text.slice(fromIdx, fromIdx + 52);
-    const m = win.match(/\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(thousand|grand|million|mil\b|k\b)?/);
-    if (!m) return null;
-    let v = parseFloat(m[1].replace(/,/g, ''));
-    if (m[2]) v *= /million|mil/.test(m[2]) ? 1e6 : 1e3;
-    const tail = win.slice((m.index || 0) + m[0].length, (m.index || 0) + m[0].length + 26);
-    return {
-      v,
-      pct: /^\s*(?:percent|%)/.test(tail),
-      annual: /(?:\b(?:a|per)\s+year\b|annually|yearly)/.test(tail),
-      monthly: /(?:\b(?:a|per)\s+month\b|monthly)/.test(tail),
-    };
-  }
-
-  function parseVoice(text: string): [string, string][] {
-    type Num = { v: number; pct: boolean; annual: boolean; monthly: boolean };
-    const next: DealState = JSON.parse(JSON.stringify(s));
-    const clampSet = (id: keyof DealState, v: number) => {
-      const [lo, hi] = SLIDER_BOUNDS[id as string];
-      const cv = Math.min(hi, Math.max(lo, v));
-      (next as any)[id] = cv;
-      return cv;
-    };
-    const timeExp = (id: string) => (n: Num) => {
-      const unit = n.annual ? 'yr' : (n.monthly ? 'mo' : next.units[id]);
-      next.units[id] = unit;
-      next.expenses[id] = Math.round(n.v);
-      return `${money0(n.v)}${unit === 'yr' ? '/yr' : '/mo'}`;
-    };
-    const rentExp = (id: string) => (n: Num) => {
-      const unit = n.pct ? '%' : '$';
-      next.units[id] = unit;
-      next.expenses[id] = n.pct ? n.v : Math.round(n.v);
-      return n.pct ? `${n.v}% of rent` : `${money0(n.v)}/mo`;
-    };
-    const utilSet = (id: string) => (n: Num) => {
-      const unit = n.annual ? 'yr' : 'mo';
-      next.utilUnits[id] = unit;
-      next.utils[id] = Math.round(n.v);
-      return `${money0(n.v)}${unit === 'yr' ? '/yr' : '/mo'}`;
-    };
-    const oiSet = (id: string) => (n: Num) => { next.otherInc[id] = Math.round(n.v); return `${money0(n.v)}/mo`; };
-
-    const FIELDS: { label: string; re: RegExp; apply: (n: Num) => string | null }[] = [
-      { label: 'Purchase price', re: /purchase price|asking price|sale price|\bprice\b/,
-        apply: n => { next.price = Math.round(n.v); return money0(n.v); } },
-      { label: 'Down payment', re: /down payment|\bdown\b/,
-        apply: n => {
-          if (n.pct) return clampSet('downPct', Math.round(n.v)) + '%';
-          if (next.price <= 0) return null;
-          const p = clampSet('downPct', Math.round(n.v / next.price * 100));
-          return `${money0(n.v)} (${p}%)`;
-        } },
-      { label: 'Rehab budget', re: /rehab|renovation/,
-        apply: n => {
-          if (sowLocked) return 'skipped — locked to Scope of Work';
-          next.rehab = Math.round(n.v); return money0(n.v);
-        } },
-      { label: 'Closing costs', re: /closing/,
-        apply: n => {
-          if (n.pct) { next.closingUnit = '%'; next.closing = n.v; return n.v + '% of price'; }
-          next.closingUnit = '$'; next.closing = Math.round(n.v); return money0(n.v);
-        } },
-      { label: 'Interest rate', re: /interest(?:\s+rate)?/,
-        apply: n => { next.rate = n.v; return n.v + '%'; } },
-      { label: 'Loan term', re: /loan term|amortization|\bterm\b/,
-        apply: n => { next.term = Math.round(n.v); return Math.round(n.v) + ' yrs'; } },
-      { label: 'Vacancy', re: /vacancy/, apply: n => clampSet('vacancy', n.v) + '%' },
-      { label: 'Rent growth', re: /rent (?:growth|increase)/, apply: n => clampSet('rentGrowth', n.v) + '%/yr' },
-      { label: 'Expense growth', re: /expense (?:growth|inflation)/, apply: n => clampSet('expGrowth', n.v) + '%/yr' },
-      { label: 'Appreciation', re: /appreciation/, apply: n => clampSet('appr', n.v) + '%/yr' },
-      { label: 'Selling costs', re: /selling costs?/, apply: n => clampSet('sellCost', n.v) + '%' },
-      { label: 'Pet rent', re: /pet (?:rent|fees?)/, apply: oiSet('pet') },
-      { label: 'Laundry income', re: /laundry/, apply: oiSet('laundry') },
-      { label: 'Parking income', re: /parking/, apply: oiSet('parking') },
-      { label: 'Storage income', re: /storage/, apply: oiSet('storage') },
-      { label: 'Other income', re: /other income/, apply: oiSet('other') },
-      { label: 'Gross monthly rent', re: /(?<!pet )(?:gross |monthly )?rents?\b(?!\s*(?:growth|increase))/,
-        apply: n => { next.rent = Math.round(n.v); return money0(n.v) + '/mo'; } },
-      { label: 'Property tax', re: /(?:property )?tax(?:es)?/, apply: timeExp('tax') },
-      { label: 'Insurance', re: /insurance/, apply: timeExp('ins') },
-      { label: 'HOA', re: /\bhoa\b|h\.?o\.?a\.?/, apply: timeExp('hoa') },
-      { label: 'Property management', re: /management/, apply: rentExp('mgmt') },
-      { label: 'Maintenance', re: /maintenance/, apply: rentExp('maint') },
-      { label: 'CapEx reserve', re: /cap ?ex|capital expend\w*/, apply: rentExp('capex') },
-      { label: 'Landscaping', re: /landscap\w*/, apply: rentExp('landscape') },
-      { label: 'Cleaning', re: /cleaning/, apply: rentExp('cleaning') },
-      { label: 'Pest control', re: /pest/, apply: rentExp('pest') },
-      { label: 'Miscellaneous', re: /miscellaneous|misc\b/, apply: rentExp('misc') },
-      { label: 'Electricity', re: /electric\w*/, apply: utilSet('electric') },
-      { label: 'Water', re: /water/, apply: utilSet('water') },
-      { label: 'Sewer', re: /sewer/, apply: utilSet('sewer') },
-      { label: 'Trash', re: /trash|garbage/, apply: utilSet('trash') },
-      { label: 'Gas', re: /\bgas\b/, apply: utilSet('gas') },
-      { label: 'Internet', re: /internet|wi-?fi/, apply: utilSet('internet') },
-    ];
-
-    const t = ' ' + text.toLowerCase() + ' ';
-    const applied: [string, string][] = [];
-    for (const f of FIELDS) {
-      const mt = t.match(f.re);
-      if (!mt) continue;
-      const n = grabNum(t, (mt.index || 0) + mt[0].length);
-      if (!n) continue;
-      const res = f.apply(n);
-      if (res) applied.push([f.label, res]);
-    }
-    if (applied.length) setS(next);
-    return applied;
-  }
-
-  function startVoice() {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { toast('Voice input needs Chrome, Edge or Safari'); return; }
-    if (voiceMode === 'listening') { recogRef.current?.stop(); return; }
-    finalRef.current = ''; cancelledRef.current = false;
-    setVoiceFinal(''); setVoiceInterim(''); setVoiceApplied([]);
-    const recog = new SR();
-    recogRef.current = recog;
-    recog.lang = 'en-US';
-    recog.continuous = true;
-    recog.interimResults = true;
-    recog.onresult = (ev: any) => {
-      let interim = '';
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        if (ev.results[i].isFinal) finalRef.current += ev.results[i][0].transcript + ' ';
-        else interim += ev.results[i][0].transcript;
-      }
-      setVoiceFinal(finalRef.current);
-      setVoiceInterim(interim);
-    };
-    recog.onerror = (ev: any) => {
-      if (ev.error === 'not-allowed')
-        setVoiceInterim('Microphone access was blocked — allow the mic for this page and try again.');
-    };
-    recog.onend = () => {
-      if (cancelledRef.current) { setVoiceMode('closed'); return; }
-      const applied = parseVoice(finalRef.current);
-      setVoiceApplied(applied);
-      setVoiceFinal(finalRef.current.trim() || '(nothing heard)');
-      setVoiceInterim('');
-      setVoiceMode('done');
-    };
-    setVoiceMode('listening');
-    recog.start();
-  }
-
-  /* ---------- PDF & email ---------- */
-  function snapshotKV(): [string, string][] {
-    return [
-      ['Purchase price', money0(eff.price)],
-      ['Down payment', `${money0(r.downAmt)} (${s.downPct}%)`],
-      ['Rehab budget', money0(eff.rehab)],
-      ['Total cash invested', money0(r.cashInvested)],
-      ['Gross rent', `${money0(s.rent)}/mo`],
-      ['Net operating income', `${money(r.noi)}/mo`],
-      ['Debt service', `${money0(r.pi)}/mo`],
-      ['Cash flow', `${money(r.cashFlow)}/mo`],
-      ['Cash-on-cash return', isFinite(r.coc) ? pct(r.coc, 1) : '—'],
-      ['DSCR', isFinite(r.dscr) ? r.dscr.toFixed(2) : '—'],
-      ['5-year total ROI', isFinite(r.roi5) ? pct(r.roi5, 0) : '—'],
-      ['Year-5 exit profit', money(r.totalProfit)],
-    ];
-  }
-
+  /* ---------- PDF report ---------- */
   function pdf() {
     const doc = buildRentalReport({
       s: eff, r, sowTotal,
       verdict: { cls: vCls, title: vTitle, sub: vSub },
     });
     openReportWindow(doc, '', () => toast('Pop-up blocked — allow pop-ups to open the report'));
-  }
-
-  function email() {
-    const name = s.name || 'Untitled deal';
-    const body = `${name}${s.prop.address ? ' — ' + s.prop.address : ''}\n${vTitle}\n\n` +
-      snapshotKV().map(([k, v]) => `${k}: ${v}`).join('\n') +
-      '\n\n— Generated by Real Estate Investor Toolkit';
-    location.href = `mailto:?subject=${encodeURIComponent('Deal report — ' + name)}&body=${encodeURIComponent(body)}`;
   }
 
   /* ---------- scope of work: contractor download ---------- */
@@ -506,16 +312,12 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
     <>
       {/* ---------- deal header ---------- */}
       <div className="deal-head">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div className="deal-topline">
           <div className="deal-title-wrap" ref={menuWrapRef}>
-            <span className="deal-name" ref={nameRef} contentEditable suppressContentEditableWarning
-              spellCheck={false} data-placeholder="Untitled deal — tap to name"
-              onInput={ev => set('name', (ev.target as HTMLElement).textContent?.trim() || '')}
-              onKeyDown={ev => { if (ev.key === 'Enter') { ev.preventDefault(); (ev.target as HTMLElement).blur(); } }}
-              onPaste={ev => {
-                ev.preventDefault();
-                document.execCommand('insertText', false, ev.clipboardData.getData('text/plain').replace(/\n/g, ' '));
-              }} />
+            <div className="addr-slot" ref={addrRef}>
+              <AddressInput value={s.prop.address} onChange={setAddress}
+                placeholder="Property address — start typing to search" />
+            </div>
             <button className="caret-btn" title="Switch deal"
               onClick={ev => { ev.stopPropagation(); setMenuOpen(o => !o); }}>▾</button>
             <div className={`deal-menu${menuOpen ? ' open' : ''}`}>
@@ -527,7 +329,7 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
                   <div className="dm-item" key={d.name}
                     onClick={() => { applyDeal(d); setMenuOpen(false); }}>
                     <div>
-                      <div className="dm-n">{d.name}</div>
+                      <div className="dm-n">{dealTitle(d)}</div>
                       <div className="dm-m">{money0(d.price)} · {money(dr.cashFlow)}/mo · {isFinite(dr.coc) ? dr.coc.toFixed(1) : '—'}% CoC</div>
                     </div>
                     <button className="dm-del" title="Delete"
@@ -537,64 +339,50 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
               })}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className={`btn voice-btn${voiceMode === 'listening' ? ' listening' : ''}`} onClick={startVoice} title="Fill inputs by speaking">🎤 Voice fill</button>
+          <div className="deal-actions">
             <button className="btn" onClick={pdf} title="Open a print-ready deal report — choose “Save as PDF” in the print dialog">⬇ PDF</button>
-            <button className="btn" onClick={email} title="Send a text snapshot via your email app">✉ Email</button>
             <button className="btn primary" onClick={saveDeal}>Save deal</button>
             <button className="btn ghost" onClick={reset}>Reset</button>
           </div>
         </div>
+
+        <div className="prop-line">
+          {([['beds', 'Beds'], ['baths', 'Baths'], ['sqft', 'Sq ft'], ['year', 'Built']] as const).map(([k, label]) => (
+            <div className="pf-item" key={k}><label>{label}</label>
+              <input className="num small" value={s.prop[k]} autoComplete="off"
+                onChange={ev => setProp(k, ev.target.value)} /></div>
+          ))}
+          <div className="pf-item"><label>List price</label>
+            <NumInput small value={s.prop.list} onChange={v => setProp('list', v)} /></div>
+          <div className="pf-item grow"><label>Video / tour link</label>
+            <input type="text" placeholder="https://youtu.be/… or Matterport" value={s.prop.video}
+              autoComplete="off" onChange={ev => setProp('video', ev.target.value)} /></div>
+          <button className="btn link-add" title="Add a listing, photos or county-record link"
+            onClick={() => setProp('urls', [...s.prop.urls, { label: '', url: '' }])}>+ Link</button>
+        </div>
+
+        {s.prop.urls.length > 0 && (
+          <div className="prop-links">
+            {s.prop.urls.map((u, i) => (
+              <div className="url-row" key={i}>
+                <input type="text" placeholder="Label (Photos…)" value={u.label} autoComplete="off"
+                  onChange={ev => setProp('urls', s.prop.urls.map((x, j) => j === i ? { ...x, label: ev.target.value } : x))} />
+                <input type="text" placeholder="https://…" value={u.url} autoComplete="off"
+                  onChange={ev => setProp('urls', s.prop.urls.map((x, j) => j === i ? { ...x, url: ev.target.value } : x))} />
+                <button className="del" title="Remove"
+                  onClick={() => setProp('urls', s.prop.urls.filter((_, j) => j !== i))}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {chips.length > 0 && (
-          <div className="prop-chips" style={{ marginTop: 8 }}>
+          <div className="prop-chips">
             {chips.map((c, i) => c.href
               ? <a key={i} className={`p-chip${c.link ? ' link' : ''}`} href={c.href} target="_blank" rel="noopener noreferrer">{c.html}</a>
               : <span key={i} className="p-chip">{c.html}</span>)}
           </div>
         )}
-        <details className="collapse" style={{ marginTop: 8, background: 'var(--card)' }}>
-          <summary><span><span className="chev">▶</span>&nbsp; Property details &amp; links</span>
-            <span className="sum-val">{linkCount ? `${linkCount} link${linkCount > 1 ? 's' : ''}` : ''}</span></summary>
-          <div className="inner">
-            <div className="prop-addr-row" style={{ marginTop: 8 }}>
-              <input type="text" placeholder="Property address (e.g. 123 Main St, Springfield, IL 62704)"
-                value={s.prop.address} autoComplete="off"
-                onChange={ev => setProp('address', ev.target.value)} />
-            </div>
-            <div className="prop-facts" style={{ marginTop: 10 }}>
-              {([['beds', 'Beds'], ['baths', 'Baths'], ['sqft', 'Sq ft'], ['year', 'Year built']] as const).map(([k, label]) => (
-                <div className="pf-item" key={k}><label>{label}</label>
-                  <input className="num small" value={s.prop[k]} autoComplete="off"
-                    onChange={ev => setProp(k, ev.target.value)} /></div>
-              ))}
-              <div className="pf-item"><label>List price</label>
-                <NumInput small value={s.prop.list} onChange={v => setProp('list', v)} /></div>
-            </div>
-            <div className="row" style={{ marginTop: 6 }}><label>Video tour URL</label></div>
-            <div className="url-row" style={{ gridTemplateColumns: '1fr 30px' }}>
-              <input type="text" placeholder="https://youtu.be/… or Matterport, etc." value={s.prop.video}
-                autoComplete="off" onChange={ev => setProp('video', ev.target.value)} />
-              <button className="del" title="Open" onClick={() => { const u = normUrl(s.prop.video); if (u) window.open(u, '_blank', 'noopener'); }}>↗</button>
-            </div>
-            <div className="row" style={{ marginTop: 6 }}>
-              <label>Other links <span className="sub">pictures, county records, listing pages…</span></label>
-              <button className="btn" style={{ fontSize: 11.5, padding: '6px 10px' }}
-                onClick={() => setProp('urls', [...s.prop.urls, { label: '', url: '' }])}>+ Add link</button>
-            </div>
-            <div>
-              {s.prop.urls.map((u, i) => (
-                <div className="url-row" key={i}>
-                  <input type="text" placeholder="Label (Photos…)" value={u.label} autoComplete="off"
-                    onChange={ev => setProp('urls', s.prop.urls.map((x, j) => j === i ? { ...x, label: ev.target.value } : x))} />
-                  <input type="text" placeholder="https://…" value={u.url} autoComplete="off"
-                    onChange={ev => setProp('urls', s.prop.urls.map((x, j) => j === i ? { ...x, url: ev.target.value } : x))} />
-                  <button className="del" title="Remove"
-                    onClick={() => setProp('urls', s.prop.urls.filter((_, j) => j !== i))}>✕</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </details>
       </div>
 
       {/* ---------- tabs ---------- */}
@@ -879,6 +667,19 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
               </div>
             </div>
 
+            {/* headline numbers first, then the sliders that move them */}
+            <div className="tiles uniform">
+              <Tile label="Cash-on-Cash Return" value={isFinite(r.coc) ? pct(r.coc, 1) : '—'}
+                note="year-1 cash flow ÷ cash invested" valueClass={r.coc >= 0 ? 'pos' : 'neg'} />
+              <Tile label="Monthly Cash Flow" value={money(r.cashFlow)}
+                note="after all expenses & debt" valueClass={r.cashFlow >= 0 ? 'pos' : 'neg'} />
+              <Tile label="DSCR" value={isFinite(r.dscr) ? r.dscr.toFixed(2) : '∞'}
+                note="NOI ÷ debt service · lenders want ≥ 1.25"
+                valueClass={r.dscr >= 1.25 || !isFinite(r.dscr) ? 'pos' : r.dscr >= 1 ? '' : 'neg'} />
+              <Tile label="5-Year Total ROI" value={isFinite(r.roi5) ? pct(r.roi5, 0) : '—'}
+                note="cash flow + equity + appreciation" valueClass={r.roi5 >= 0 ? 'pos' : 'neg'} />
+            </div>
+
             <Card className="assume" title="Variable Assumptions" tag="Watch the numbers react" style={{ marginBottom: 16 }}>
               <SliderRow label="Vacancy" min={0} max={20} step={0.5} value={s.vacancy}
                 onChange={v => set('vacancy', v)} output={stripZeros(pct(s.vacancy, 1))} />
@@ -891,18 +692,6 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
               <SliderRow label="Selling costs at exit" min={0} max={12} step={0.5} value={s.sellCost}
                 onChange={v => set('sellCost', v)} output={stripZeros(pct(s.sellCost, 1))} />
             </Card>
-
-            <div className="tiles">
-              <Tile hero label="Cash-on-Cash Return" value={isFinite(r.coc) ? pct(r.coc, 1) : '—'}
-                note="year-1 cash flow ÷ cash invested" valueClass={r.coc >= 0 ? 'pos' : 'neg'} />
-              <Tile label="Monthly Cash Flow" value={money(r.cashFlow)} negative={r.cashFlow < 0}
-                note="after all expenses & debt" valueClass={r.cashFlow >= 0 ? 'pos' : 'neg'} />
-              <Tile label="DSCR" value={isFinite(r.dscr) ? r.dscr.toFixed(2) : '∞'}
-                note="NOI ÷ debt service · lenders want ≥ 1.25"
-                valueClass={r.dscr >= 1.25 || !isFinite(r.dscr) ? 'pos' : r.dscr >= 1 ? '' : 'neg'} />
-              <Tile label="5-Year Total ROI" value={isFinite(r.roi5) ? pct(r.roi5, 0) : '—'}
-                note="cash flow + equity + appreciation" valueClass={r.roi5 >= 0 ? 'pos' : 'neg'} />
-            </div>
 
             <div className="checks">
               <div className={`check ${r.onePct >= 1 ? 'pass' : 'fail'}`}>
@@ -1014,32 +803,6 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
         <p className="footnote">The Scope of Work saves with the deal. While it has line items, the analyzer&apos;s rehab field is locked to this total; delete all items to enter rehab manually again. The download produces a clean document you can email or print for contractor bids.</p>
       </section>
 
-      {/* ---------- voice modal ---------- */}
-      <div className={`voice-modal${voiceMode !== 'closed' ? ' show' : ''}`}>
-        <div className="voice-card">
-          <h3>{voiceMode === 'listening' ? <><span className="rec-dot" />Listening…</> : 'Voice fill — applied'}</h3>
-          {voiceMode === 'listening' &&
-            <p className="voice-hint">Say your numbers naturally, e.g. “purchase price 320,000 … rent 2,800 … down payment 20 percent … property tax 4,200 a year … insurance 150 a month … vacancy 7 percent”. Tap <strong>Stop &amp; apply</strong> when you&apos;re done.</p>}
-          <div className="voice-transcript">
-            {voiceFinal}<span className="interim">{voiceInterim || (voiceMode === 'listening' && !voiceFinal ? '…' : '')}</span>
-          </div>
-          {voiceMode === 'done' && (
-            <div className="voice-results">
-              {voiceApplied.length
-                ? voiceApplied.map(([f, v], i) => <div className="vr" key={i}><span className="f">{f}</span><span className="v">{v}</span></div>)
-                : <div className="empty-note">No fields recognized — try naming the field then the number, e.g. “rent 2,500”.</div>}
-            </div>
-          )}
-          <div className="voice-actions">
-            {voiceMode === 'listening' &&
-              <button className="btn primary" onClick={() => recogRef.current?.stop()}>■ Stop &amp; apply</button>}
-            <button className="btn ghost" onClick={() => {
-              if (voiceMode === 'listening') { cancelledRef.current = true; recogRef.current?.stop(); }
-              else setVoiceMode('closed');
-            }}>{voiceMode === 'listening' ? 'Cancel' : 'Close'}</button>
-          </div>
-        </div>
-      </div>
     </>
   );
 }
