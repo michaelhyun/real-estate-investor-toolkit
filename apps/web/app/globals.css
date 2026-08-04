@@ -104,6 +104,19 @@ body {
 .auth-notice.ok { background:var(--accent-soft); border:1px solid #bcd8d0; color:var(--accent-strong); }
 .auth-notice.err { background:var(--neg-soft); border:1px solid #e5c3b1; color:var(--neg); }
 .auth-cta { width:100%; padding:11px 14px; font-size:14px; }
+.auth-oauth {
+  width:100%; display:flex; align-items:center; justify-content:center; gap:9px;
+  font-family:var(--sans); font-size:14px; font-weight:600; color:var(--ink);
+  padding:10px 14px; border:1px solid var(--line-strong); border-radius:8px;
+  background:#fff; cursor:pointer;
+}
+.auth-oauth:hover { background:#faf9f7; }
+.auth-oauth:disabled { opacity:.6; cursor:default; }
+.auth-or {
+  display:flex; align-items:center; gap:10px; margin:14px 0;
+  font-size:11.5px; font-weight:600; color:var(--ink-soft);
+}
+.auth-or::before, .auth-or::after { content:''; flex:1; height:1px; background:var(--line); }
 .auth-alt { display:flex; justify-content:space-between; gap:10px; margin-top:14px; flex-wrap:wrap; }
 .auth-alt button {
   border:none; background:none; cursor:pointer; font-family:var(--sans);
