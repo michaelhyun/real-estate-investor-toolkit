@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Fraunces, Public_Sans, Spline_Sans_Mono } from 'next/font/google';
 import './globals.css';
 import { Shell } from '../components/Shell';
+import { AuthProvider } from '../components/auth';
 
 const display = Fraunces({ subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-display' });
 const sans = Public_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-sans' });
@@ -17,10 +18,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
       <body>
-        <div className="wrap">
-          <Shell />
-          {children}
-        </div>
+        <AuthProvider>
+          <div className="wrap">
+            <Shell />
+            {children}
+          </div>
+        </AuthProvider>
       </body>
     </html>
   );

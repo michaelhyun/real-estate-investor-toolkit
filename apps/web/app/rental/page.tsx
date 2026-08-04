@@ -16,6 +16,8 @@ import { Card, NumInput, Switch, UnitToggle, Tile, SliderRow, loadJSON, saveJSON
 import { buildRentalReport } from '../../components/report';
 import { AddressInput } from '../../components/AddressInput';
 import { toast } from '../../components/toast';
+import { useAuth } from '../../components/auth';
+import { fetchDeals, pushDeals, deleteRemoteDeal, mergeDeals } from '../../lib/dealsync';
 
 const STORE_KEY = 'rentalDeals.v3';
 const DRAFT_KEY = 'rentalCalc.draft.v3';
@@ -88,6 +90,8 @@ export default function RentalPage() {
   const [hydrated, setHydrated] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
   const addrRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
+  const syncedFor = useRef<string | null>(null);
 
   /* ---------- hydrate: draft + saved deals ---------- */
   useEffect(() => {
@@ -101,6 +105,31 @@ export default function RentalPage() {
     setHydrated(true);
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
+
+  /* ---------- cloud sync ----------
+     Once per sign-in, pull the account's deals and merge with local — newest
+     savedAt wins per deal, one-sided deals are kept on both sides (see
+     dealsync.ts). After that, saves and deletes mirror up individually. */
+  useEffect(() => { if (!user) syncedFor.current = null; }, [user]);
+  useEffect(() => {
+    if (!hydrated || !user || syncedFor.current === user.id) return;
+    syncedFor.current = user.id;
+    (async () => {
+      try {
+        const remote = await fetchDeals();
+        const { merged, toPush } = mergeDeals(savedDeals, remote);
+        const deals = merged.map(normalizeDeal);
+        setSavedDeals(deals);
+        saveJSON(STORE_KEY, deals);
+        if (toPush.length) await pushDeals(user.id, toPush);
+        if (remote.length || toPush.length) toast('Deals synced with your account');
+      } catch {
+        syncedFor.current = null;
+        toast('Cloud sync failed — your deals are safe on this device');
+      }
+    })();
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [hydrated, user]);
 
   /* close deal menu on outside click */
   useEffect(() => {
@@ -164,6 +193,7 @@ export default function RentalPage() {
     setSavedDeals(deals);
     saveJSON(STORE_KEY, deals);
     toast(i >= 0 ? 'Deal updated' : 'Deal saved');
+    if (user) pushDeals(user.id, [deal]).catch(() => toast('Saved on this device — cloud sync failed'));
   }
 
   function deleteDeal(name: string) {
@@ -171,6 +201,7 @@ export default function RentalPage() {
     const deals = savedDeals.filter(d => d.name !== name);
     setSavedDeals(deals);
     saveJSON(STORE_KEY, deals);
+    if (user) deleteRemoteDeal(name).catch(() => toast('Removed on this device — cloud delete failed'));
   }
 
   function reset() {

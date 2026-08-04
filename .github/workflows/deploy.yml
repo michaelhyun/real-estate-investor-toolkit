@@ -36,6 +36,10 @@ jobs:
         run: npm run build
         env:
           GITHUB_PAGES: 'true'
+          # Supabase publishable credentials — public by design (they ship in
+          # the JS bundle either way); row-level security protects the data.
+          NEXT_PUBLIC_SUPABASE_URL: https://mzcnzzmnhqxnkaqlveke.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_i86WIa5Gc7GdgEvoAqT2bg_rEUzW7uL
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

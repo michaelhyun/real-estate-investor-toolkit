@@ -76,6 +76,42 @@ body {
 .shell-menu .sm-n { font-weight:600; font-size:13px; }
 .shell-menu .sm-d { font-size:11.5px; color:var(--ink-soft); margin-top:1px; }
 
+/* ---------- account (header) ---------- */
+.shell-switch.acct { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.shell-switch.signin { text-decoration:none; display:inline-block; color:var(--accent-strong); border-color:#bcd8d0; background:var(--accent-soft); }
+.shell-switch.signin:hover { border-color:var(--accent); }
+.shell-menu.acct-menu { min-width:230px; }
+.am-note { font-size:11.5px; color:var(--ink-soft); padding:8px 11px 6px; line-height:1.45; }
+.am-signout {
+  display:block; width:100%; text-align:left; font-family:var(--sans); font-size:13px; font-weight:600;
+  color:var(--neg); border:none; background:none; padding:9px 11px; border-radius:7px; cursor:pointer;
+}
+.am-signout:hover { background:var(--neg-soft); }
+
+/* ---------- auth page ---------- */
+.auth-wrap { max-width:400px; margin:36px auto 0; }
+.auth-card { padding:26px 26px 24px; }
+.auth-card h1 { font-family:var(--display); font-weight:600; font-size:23px; letter-spacing:-.01em; }
+.auth-sub { font-size:13px; color:var(--ink-soft); margin:6px 0 16px; line-height:1.5; }
+.auth-field { margin-bottom:12px; }
+.auth-field label { display:block; font-size:11.5px; font-weight:600; color:var(--ink-soft); margin-bottom:4px; }
+.auth-field input {
+  width:100%; font-family:var(--sans); font-size:14px; padding:10px 12px;
+  border:1px solid var(--line-strong); border-radius:8px; background:#fdfcfa; color:var(--ink);
+}
+.auth-field input:focus { outline:2px solid var(--accent); outline-offset:-1px; background:#fff; }
+.auth-notice { font-size:12.5px; font-weight:600; border-radius:8px; padding:9px 12px; margin-bottom:12px; line-height:1.45; }
+.auth-notice.ok { background:var(--accent-soft); border:1px solid #bcd8d0; color:var(--accent-strong); }
+.auth-notice.err { background:var(--neg-soft); border:1px solid #e5c3b1; color:var(--neg); }
+.auth-cta { width:100%; padding:11px 14px; font-size:14px; }
+.auth-alt { display:flex; justify-content:space-between; gap:10px; margin-top:14px; flex-wrap:wrap; }
+.auth-alt button {
+  border:none; background:none; cursor:pointer; font-family:var(--sans);
+  font-size:12px; font-weight:600; color:var(--accent-strong); padding:0;
+}
+.auth-alt button:hover { text-decoration:underline; }
+.auth-foot { text-align:center; margin-top:14px; }
+
 /* ---------- buttons ---------- */
 .btn {
   font-family:var(--sans); font-size:13px; font-weight:600; cursor:pointer;

@@ -1,6 +1,7 @@
-/* The whole toolkit is client-side — every page is 'use client', all state lives
-   in localStorage, and there are no API routes or server actions. So it exports
-   to plain static files and can be hosted straight off GitHub Pages.
+/* The whole toolkit is client-side — every page is 'use client' and there are
+   no API routes or server actions; state lives in localStorage and, when signed
+   in, syncs to Supabase straight from the browser. So it exports to plain
+   static files and can be hosted straight off GitHub Pages.
 
    Pages serves a project site under /<repo>/, so the build needs basePath and
    assetPrefix set to that prefix — but only there. The deploy workflow sets
