@@ -6,8 +6,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  defaultFlipState, computeFlip, computeGrid, solveMAO, seventyRule,
-  buildSensitivity, SCENARIO_KEYS, type FlipState,
+  defaultFlipState, computeFlip, solveMAO, seventyRule,
+  buildSensitivity, type FlipState,
 } from '../src/flip';
 import { cityTransferTax, findCity, countyTransferTax } from '../src/bayAreaCities';
 import { computeChecklist, CATALOG, ITEM_BY_ID, seededQty, type QtyContext } from '../src/flipCatalog';
@@ -30,11 +30,16 @@ describe('computeFlip — structure', () => {
     near(r.holdMonths, 5 + 51 / 30.4375, 0.01);
   });
 
-  it('applies contingency on top of rehab exactly once', () => {
-    const r = computeFlip(base({ rehab: { low: 100000, base: 200000, high: 300000 }, contingencyPct: 10 }));
-    near(r.rehabBase, 200000);
-    near(r.contingency, 20000);
+  it('spends the estimate plus its buffer, and counts the buffer once', () => {
+    const r = computeFlip(base({ rehabEst: 200000, rehabBuffer: 20000 }));
+    near(r.rehabEst, 200000);
+    near(r.rehabBuffer, 20000);
     near(r.rehabTotal, 220000);
+  });
+
+  it('a rehab override replaces the whole budget, buffer included', () => {
+    const r = computeFlip(base({ rehabEst: 200000, rehabBuffer: 20000 }), 'base', 175000);
+    near(r.rehabTotal, 175000);
   });
 
   it('prices property tax off the reassessed purchase price, not the old roll', () => {
@@ -145,37 +150,17 @@ describe('transfer tax — cliffs, not marginal brackets', () => {
   });
 });
 
-describe('the 3x3 grid', () => {
-  it('every cell matches a direct compute of the same scenario pair', () => {
-    const s = base();
-    const grid = computeGrid(s);
-    grid.forEach((row, ri) => row.forEach((cell, ai) => {
-      expect(cell.rehabKey).toBe(SCENARIO_KEYS[ri]);
-      expect(cell.arvKey).toBe(SCENARIO_KEYS[ai]);
-      near(cell.result.netProfit, computeFlip(s, SCENARIO_KEYS[ai], SCENARIO_KEYS[ri]).netProfit);
-    }));
-  });
-
-  it('profit rises with ARV and falls with rehab', () => {
-    const g = computeGrid(base());
-    /* across a row: higher ARV, more profit */
-    expect(g[0][2].result.netProfit).toBeGreaterThan(g[0][0].result.netProfit);
-    /* down a column: higher rehab, less profit */
-    expect(g[2][0].result.netProfit).toBeLessThan(g[0][0].result.netProfit);
-  });
-});
-
 describe('max allowable offer', () => {
   it('a deal bought at MAO lands exactly on the profit floor', () => {
     const s = base({ minProfit: 75000, minProfitBasis: 'after' });
     const mao = solveMAO(s);
     expect(mao).toBeGreaterThan(0);
-    near(computeFlip(s, 'base', 'base', mao).netProfit, 75000, 200);
+    near(computeFlip(s, 'base', undefined, mao).netProfit, 75000, 200);
   });
 
   it('solves against pre-tax profit when that is the basis', () => {
     const s = base({ minProfit: 120000, minProfitBasis: 'pre' });
-    near(computeFlip(s, 'base', 'base', solveMAO(s)).preTaxProfit, 120000, 200);
+    near(computeFlip(s, 'base', undefined, solveMAO(s)).preTaxProfit, 120000, 200);
   });
 
   it('a higher profit floor forces a lower offer', () => {
@@ -191,7 +176,7 @@ describe('max allowable offer', () => {
       minProfit: 60000,
     });
     const mao = solveMAO(s);
-    near(computeFlip(s, 'base', 'base', mao).netProfit, 60000, 500);
+    near(computeFlip(s, 'base', undefined, mao).netProfit, 60000, 500);
   });
 
   it('returns 0 when the deal cannot clear the floor even for free', () => {
@@ -200,7 +185,7 @@ describe('max allowable offer', () => {
 
   it('the 70% rule is reported as a cross-check, not the answer', () => {
     const s = base();
-    near(seventyRule(s), 0.70 * s.arv.base - s.rehab.base);
+    near(seventyRule(s), 0.70 * s.arv.base - (s.rehabEst + s.rehabBuffer));
     /* on this deal the rule is stricter than a real underwrite — which is the
        whole point of showing both */
     expect(seventyRule(s)).toBeLessThan(solveMAO(s));
@@ -208,19 +193,32 @@ describe('max allowable offer', () => {
 });
 
 describe('sensitivity grid', () => {
-  it('spans the scenario range with headroom past each end', () => {
+  it('spans the ARV scenarios with headroom past each end', () => {
     const s = base();
     const g = buildSensitivity(s, 7);
     expect(g.arvAxis).toHaveLength(7);
-    expect(g.rehabAxis).toHaveLength(7);
     expect(g.arvAxis[0]).toBeLessThan(s.arv.low);
     expect(g.arvAxis[6]).toBeGreaterThan(s.arv.high);
-    expect(g.rehabAxis[0]).toBeLessThan(s.rehab.low);
-    expect(g.rehabAxis[6]).toBeGreaterThan(s.rehab.high);
+  });
+
+  it('runs the rehab axis from the estimate to twice the buffer, budget centred', () => {
+    const s = base({ rehabEst: 200000, rehabBuffer: 30000 });
+    const g = buildSensitivity(s, 7);
+    expect(g.rehabAxis).toHaveLength(7);
+    near(g.rehabAxis[0], 200000);          /* spend exactly the estimate */
+    near(g.rehabAxis[3], 230000);          /* the budget you underwrite */
+    near(g.rehabAxis[6], 260000);          /* burn twice the buffer */
+    near(g.baseRehab, 230000);
+  });
+
+  it('falls back to a sane axis when the buffer is zero', () => {
+    const g = buildSensitivity(base({ rehabEst: 200000, rehabBuffer: 0 }), 7);
+    expect(new Set(g.rehabAxis).size).toBe(7);
+    expect(g.rehabAxis[6]).toBeGreaterThan(g.rehabAxis[0]);
   });
 
   it('increases left to right and decreases top to bottom', () => {
-    const g = buildSensitivity(base(), 7);
+    const g = buildSensitivity(base({ rehabBuffer: 40000 }), 7);
     for (const row of g.cells) {
       for (let i = 1; i < row.length; i++) expect(row[i]).toBeGreaterThan(row[i - 1]);
     }

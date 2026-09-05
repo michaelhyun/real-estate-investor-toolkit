@@ -3,7 +3,7 @@
    document as a string and hand it to openReportWindow to print. */
 
 import {
-  money, money0, pct, computeFlip, computeGrid, solveMAO, seventyRule, verdictFor,
+  money, money0, pct, computeFlip, solveMAO, seventyRule, verdictFor,
   SCENARIO_KEYS, findCity, CATALOG, seededQty, computeChecklist,
   type FlipState, type ScenarioKey, type QtyContext,
 } from '@reit/core';
@@ -20,18 +20,14 @@ const rows = (list: { label: string; amount: number; disclosure?: boolean }[]) =
     `<td class="r">${money0(l.amount)}</td></tr>`).join('');
 
 export function buildFlipReport(s: FlipState): string {
-  const r = computeFlip(s, 'base', 'base');
-  const grid = computeGrid(s);
+  const r = computeFlip(s, 'base');
+  const cols = SCENARIO_KEYS.map(k => computeFlip(s, k));
   const v = verdictFor(r, s);
   const mao = solveMAO(s);
   const city = findCity(s.citySlug);
 
-  const gridRows = grid.map((row, ri) => {
-    const rk = SCENARIO_KEYS[ri];
-    return `<tr><td><b>Rehab ${rk}</b><br><span class="s">${money0(s.rehab[rk])}</span></td>` +
-      row.map(c => `<td class="r">${money(c.result.netProfit)}<br>` +
-        `<span class="s">${c.result.roi.toFixed(1)}% ROI</span></td>`).join('') + '</tr>';
-  }).join('');
+  const scenarioRow = (label: string, pick: (x: typeof cols[number]) => string) =>
+    `<tr><td>${label}</td>` + cols.map(c => `<td class="r">${pick(c)}</td>`).join('') + '</tr>';
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Flip Analysis — ${escapeHtml(title(s))}</title>
@@ -58,7 +54,7 @@ export function buildFlipReport(s: FlipState): string {
       <td>ARV — base</td><td class="r">${money0(s.arv.base)}</td></tr>
   <tr><td>Purchase $/sqft</td><td class="r">${money0(r.pricePsf)}</td>
       <td>ARV $/sqft</td><td class="r">${money0(r.arvPsf)}</td></tr>
-  <tr><td>Rehab incl. ${s.contingencyPct}% contingency</td><td class="r">${money0(r.rehabTotal)}</td>
+  <tr><td>Rehab — ${money0(r.rehabEst)} est + ${money0(r.rehabBuffer)} buffer</td><td class="r">${money0(r.rehabTotal)}</td>
       <td>Gross spread</td><td class="r">${pct(r.grossSpread)}</td></tr>
   <tr><td>Hold period</td><td class="r">${r.holdMonths.toFixed(1)} mo</td>
       <td>Max allowable offer</td><td class="r">${money0(mao)}</td></tr>
@@ -73,7 +69,7 @@ export function buildFlipReport(s: FlipState): string {
   <tr class="total"><td>Net sale proceeds</td><td class="r">${money(r.netProceeds)}</td></tr>
   <tr><td>Less purchase price</td><td class="r">(${money0(s.price)})</td></tr>
   <tr><td>Less acquisition costs</td><td class="r">(${money0(r.acqTotal)})</td></tr>
-  <tr><td>Less rehab incl. contingency</td><td class="r">(${money0(r.rehabTotal)})</td></tr>
+  <tr><td>Less rehab budget</td><td class="r">(${money0(r.rehabTotal)})</td></tr>
   <tr><td>Less holding costs</td><td class="r">(${money0(r.holdTotal)})</td></tr>
   <tr><td>Less financing</td><td class="r">(${money0(r.finTotal)})</td></tr>
   <tr class="total"><td>Pre-tax profit</td><td class="r">${money(r.preTaxProfit)}</td></tr>
@@ -81,11 +77,14 @@ export function buildFlipReport(s: FlipState): string {
   <tr class="total"><td>Net profit after tax</td><td class="r">${money(r.netProfit)}</td></tr>
 </table>
 
-<h2>Scenarios — rehab against ARV</h2>
+<h2>Scenarios — the three ARV cases</h2>
 <table class="grid-tbl">
   <tr><th></th>${SCENARIO_KEYS.map(k =>
     `<th>ARV ${k}<br><span class="s">${money0(s.arv[k])}</span></th>`).join('')}</tr>
-  ${gridRows}
+  ${scenarioRow('Net profit after tax', c => money(c.netProfit))}
+  ${scenarioRow('Return on cash', c => c.roi.toFixed(1) + '%')}
+  ${scenarioRow('Annualized', c => c.annualizedRoi.toFixed(1) + '%')}
+  ${scenarioRow('Peak cash', c => money0(c.peakCash))}
 </table>
 
 <h2>Capital</h2>

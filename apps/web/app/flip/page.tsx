@@ -17,7 +17,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  defaultFlipState, computeFlip, computeGrid, solveMAO, seventyRule, buildSensitivity,
+  defaultFlipState, computeFlip, solveMAO, seventyRule, buildSensitivity,
   verdictFor, SCENARIO_KEYS, ACQ_ITEMS, HOLD_ITEMS, SELL_FLAT_ITEMS,
   CATALOG, computeChecklist, seededQty, citiesByCounty, findCity,
   money, money0, pct,
@@ -38,7 +38,7 @@ const CATALOG_KEY = 'flipCatalog.v1';
 /* the account-side store for this tool — 'flip' is named once, here */
 const cloud = dealStore<FlipState>('flip');
 
-type TabId = 'assumptions' | 'model' | 'sensitivity' | 'checklist';
+type TabId = 'assumptions' | 'model' | 'checklist';
 
 /* ------------------------------------------------------------ normalization */
 
@@ -50,7 +50,14 @@ function normalizeFlip(d: any): FlipState {
     name: d.name || '',
     prop: { ...base.prop, ...(d.prop || {}), urls: (d.prop?.urls || []).map((u: any) => ({ label: u.label || '', url: u.url || '' })) },
     arv: { ...base.arv, ...(d.arv || {}) },
-    rehab: { ...base.rehab, ...(d.rehab || {}) },
+    /* Deals saved before rehab became estimate-plus-buffer carry a low/base/high
+       triple and a contingency percent. Read the base as the estimate and the
+       gap up to high as the buffer, falling back to the old contingency. */
+    rehabEst: d.rehabEst ?? d.rehab?.base ?? base.rehabEst,
+    rehabBuffer: d.rehabBuffer ?? (d.rehab
+      ? Math.max(0, (d.rehab.high ?? 0) - (d.rehab.base ?? 0))
+        || Math.round((d.rehab.base ?? 0) * ((d.contingencyPct ?? 0) / 100))
+      : base.rehabBuffer),
     acq: { ...base.acq, ...(d.acq || {}) },
     hold: { ...base.hold, ...(d.hold || {}) },
     sell: { ...base.sell, ...(d.sell || {}) },
@@ -61,14 +68,23 @@ function normalizeFlip(d: any): FlipState {
 
 /* ------------------------------------------------------------------ helpers */
 
-/** Diverging heat scale centred on $0 — the sign of a cell reads before the
-    number does. Returns a matching text colour so every cell stays legible. */
-function heatColor(v: number, min: number, max: number) {
-  const MID = [242, 240, 234], POS = [23, 92, 78], NEG = [166, 71, 36];
-  const to = v >= 0 ? POS : NEG;
-  const span = v >= 0 ? max : min;
-  const t = span !== 0 ? Math.min(1, Math.abs(v / span)) : 0;
-  const c = MID.map((m, i) => Math.round(m + (to[i] - m) * t));
+/* Three colour bands with a hard step at the profit floor, because that is the
+   boundary that decides anything: a loss reads rust, a profit that misses your
+   floor reads amber, and clearing the floor jumps straight to green. The step
+   is deliberately abrupt — a smooth ramp through the floor would hide the one
+   line you actually care about. */
+const LOSS_0 = [246, 232, 224], LOSS_1 = [166, 71, 36];
+const WARN_0 = [253, 246, 218], WARN_1 = [238, 208, 94];
+const GOOD_0 = [176, 212, 197], GOOD_1 = [21, 86, 72];
+
+const mix = (a: number[], b: number[], t: number) =>
+  a.map((x, i) => Math.round(x + (b[i] - x) * Math.max(0, Math.min(1, t))));
+
+function heatColor(v: number, floor: number, min: number, max: number) {
+  let c: number[];
+  if (v < 0) c = mix(LOSS_0, LOSS_1, min < 0 ? v / min : 0);
+  else if (v < floor) c = mix(WARN_0, WARN_1, floor > 0 ? v / floor : 0);
+  else c = mix(GOOD_0, GOOD_1, max > floor ? (v - floor) / (max - floor) : 0);
   const lum = (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
   return { background: `rgb(${c.join(',')})`, color: lum > 0.58 ? '#21252b' : '#fff' };
 }
@@ -140,7 +156,6 @@ export default function FlipPage() {
   const [s, setS] = useState<FlipState>(defaultFlipState);
   const [catalogPrices, setCatalogPrices] = useState<Record<string, number>>({});
   const [tab, setTab] = useState<TabId>('assumptions');
-  const [sel, setSel] = useState<{ a: ScenarioKey; r: ScenarioKey }>({ a: 'base', r: 'base' });
   const [openSecs, setOpenSecs] = useState<Record<string, boolean>>({ demo: true });
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [savedDeals, setSavedDeals] = useState<FlipState[]>([]);
@@ -156,7 +171,6 @@ export default function FlipPage() {
   const setMap = (group: 'acq' | 'hold' | 'sell', id: string, v: number) =>
     setS(p => ({ ...p, [group]: { ...p[group], [id]: v } }));
   const setArv = (k: ScenarioKey, v: number) => setS(p => ({ ...p, arv: { ...p.arv, [k]: v } }));
-  const setRehab = (k: ScenarioKey, v: number) => setS(p => ({ ...p, rehab: { ...p.rehab, [k]: v } }));
 
   /* ---------- hydrate ---------- */
   useEffect(() => {
@@ -212,10 +226,9 @@ export default function FlipPage() {
     () => computeChecklist(s.checked, s.qty, catalogPrices, ctx),
     [s.checked, s.qty, catalogPrices, ctx]);
 
-  const rBase = useMemo(() => computeFlip(s, 'base', 'base'), [s]);
-  /* the P&L shows all three rehab scenarios side by side at the selected ARV */
-  const cols = useMemo(() => SCENARIO_KEYS.map(rk => computeFlip(s, sel.a, rk)), [s, sel.a]);
-  const grid = useMemo(() => computeGrid(s), [s]);
+  const rBase = useMemo(() => computeFlip(s, 'base'), [s]);
+  /* rehab is one budget now, so the P&L compares the three ARV scenarios */
+  const cols = useMemo(() => SCENARIO_KEYS.map(k => computeFlip(s, k)), [s]);
   const sens = useMemo(() => buildSensitivity(s, 7), [s]);
   const mao = useMemo(() => solveMAO(s), [s]);
   const verdict = verdictFor(rBase, s);
@@ -241,12 +254,11 @@ export default function FlipPage() {
   const sellVerdict = rBase.sellPctOfSale <= 9
     ? <span className="ok">in range</span>
     : <span className="warn">above the usual 7–9%</span>;
-  const selIdx = SCENARIO_KEYS.indexOf(sel.r);
+  const selIdx = 1;                       /* base ARV is the column to beat */
 
   const diverged = s.rehabSource === 'checklist' && checklist.checkedCount > 0 &&
-    (Math.abs(checklist.base - s.rehab.base) > 1 ||
-     Math.abs(checklist.low - s.rehab.low) > 1 ||
-     Math.abs(checklist.high - s.rehab.high) > 1);
+    (Math.abs(checklist.base - s.rehabEst) > 1 ||
+     Math.abs(Math.max(0, checklist.high - checklist.base) - s.rehabBuffer) > 1);
 
   /* ---------- actions ---------- */
   const setAddress = (v: string) =>
@@ -267,11 +279,14 @@ export default function FlipPage() {
   }
 
   function pushChecklist() {
+    /* the checklist's own base is the estimate; the gap up to its high estimate
+       is a buffer you have actually itemised rather than a guessed percentage */
     setS(p => ({
       ...p, rehabSource: 'checklist',
-      rehab: { low: Math.round(checklist.low), base: Math.round(checklist.base), high: Math.round(checklist.high) },
+      rehabEst: Math.round(checklist.base),
+      rehabBuffer: Math.round(Math.max(0, checklist.high - checklist.base)),
     }));
-    toast('Rehab budget updated from the checklist');
+    toast('Rehab estimate and buffer updated from the checklist');
   }
 
   function saveDeal() {
@@ -363,7 +378,7 @@ export default function FlipPage() {
               <div className="dm-item new" onClick={newDeal}>＋ New deal</div>
               {!savedDeals.length && <div className="dm-empty">No saved flips yet — hit “Save deal” to keep one here.</div>}
               {[...savedDeals].sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || '')).map(d => {
-                const dr = computeFlip(d, 'base', 'base');
+                const dr = computeFlip(d, 'base');
                 return (
                   <div className="dm-item" key={d.name}
                     onClick={() => { setS(normalizeFlip(d)); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
@@ -399,7 +414,6 @@ export default function FlipPage() {
         <button className={`tab${tab === 'assumptions' ? ' on' : ''}`} onClick={() => setTab('assumptions')}>Assumptions</button>
         <button className={`tab${tab === 'model' ? ' on' : ''}`} onClick={() => setTab('model')}>
           Deal Model <span className="badge">{compact(rBase.netProfit)}</span></button>
-        <button className={`tab${tab === 'sensitivity' ? ' on' : ''}`} onClick={() => setTab('sensitivity')}>Sensitivity</button>
         <button className={`tab${tab === 'checklist' ? ' on' : ''}`} onClick={() => setTab('checklist')}>
           Cost Checklist <span className="badge">{checklist.checkedCount || '0'}</span></button>
       </nav>
@@ -462,24 +476,15 @@ export default function FlipPage() {
             note={<><b>Target 25–30% of ARV.</b> You are at {pct(rBase.grossSpread)} — {spreadVerdict}.</>} />
 
           <Band span={4} tag={s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}>Rehab budget</Band>
-          <G>Bay Area pricing: cosmetic <b>$90–160/sf</b>, full gut <b>$200–350/sf</b>. Yours is {money0(rBase.rehabPsf)}/sf at base — {rehabVerdict}. Build it on the Cost Checklist tab and push it here.</G>
-          <R label="Rehab — low" unit={psf(s.rehab.low, sqft)}
-            note="Everything goes right: no dry rot, no surprises behind the walls.">
-            <Money value={s.rehab.low} onChange={v => setRehab('low', v)} /></R>
-          <R label="Rehab — base" unit={psf(s.rehab.base, sqft)}
-            note="What you would tell a partner the job costs. The deal lives on it.">
-            <Money value={s.rehab.base} onChange={v => setRehab('base', v)} /></R>
-          <R label="Rehab — high" unit={psf(s.rehab.high, sqft)}
-            note="You open the walls and find why it was cheap. Honest case pre-1950.">
-            <Money value={s.rehab.high} onChange={v => setRehab('high', v)} /></R>
-          <R label="Contingency" unit="%"
-            note="10% on a cosmetic scope, 15–20% on a gut or anything pre-1950.">
-            <Num value={s.contingencyPct} onChange={v => set('contingencyPct', v)} /></R>
-          <V cls="tot" label="Base rehab incl. contingency" value={money0(rBase.rehabTotal)}
-            unit={psf(rBase.rehabTotal, sqft)}
-            note={checklist.checkedCount > 0
-              ? `Checklist has ${checklist.checkedCount} items at ${money0(checklist.base)} base.`
-              : 'Nothing checked on the Cost Checklist yet.'} />
+          <G>Bay Area pricing: cosmetic <b>$90–160/sf</b>, full gut <b>$200–350/sf</b>. Yours is {money0(rBase.rehabPsf)}/sf all-in — {rehabVerdict}.</G>
+          <R label="Estimated rehab cost" unit={psf(s.rehabEst, sqft)}
+            note="Your honest scope priced out. Build it on the Cost Checklist tab and push it here.">
+            <Money value={s.rehabEst} onChange={v => set('rehabEst', v)} /></R>
+          <R label="Buffer" unit={s.rehabEst > 0 ? pct(s.rehabBuffer / s.rehabEst * 100) : ''}
+            note="Headroom in dollars. 10% of the estimate on a cosmetic scope, 15–20% on a gut or anything pre-1950.">
+            <Money value={s.rehabBuffer} onChange={v => set('rehabBuffer', v)} /></R>
+          <V cls="tot" label="Rehab budget" value={money0(rBase.rehabTotal)} unit={psf(rBase.rehabTotal, sqft)}
+            note={<>Estimate plus buffer — and the buffer also sets how far the Deal Model grid stress-tests you.</>} />
 
           <Band span={4} tag={`${rBase.holdMonths.toFixed(1)} mo hold`}>Timeline</Band>
           <G>Every extra month costs holding <b>and</b> interest at once. Bay Area flips run <b>5–8 months</b> door to door. Yours is {rBase.holdMonths.toFixed(1)} — {holdVerdict}.</G>
@@ -649,7 +654,7 @@ export default function FlipPage() {
         {diverged && (
           <div className="notice warn" style={{ marginTop: 12 }}>
             <div><b>Checklist and budget have diverged</b>
-              Checklist says {money0(checklist.base)} base; this deal uses {money0(s.rehab.base)}.</div>
+              Checklist estimates {money0(checklist.base)}; this deal uses {money0(s.rehabEst)}.</div>
             <div className="act">
               <button onClick={pushChecklist}>Re-sync</button>
               <button onClick={() => set('rehabSource', 'manual')}>Keep mine</button>
@@ -692,59 +697,74 @@ export default function FlipPage() {
           ? `The 70% rule is stricter than your own numbers by ${money0(mao - seventyRule(s))}. It assumes financing and selling costs that Bay Area price points don't match, so trust your MAO.`
           : `The 70% rule is looser than your own numbers by ${money0(seventyRule(s) - mao)}. Your underwrite says pay less than the rule of thumb — trust the underwrite.`}</div></div>
 
+        {/* The 3x3 scenario table and the sensitivity grid were the same
+            question asked twice, so only the grid survives. */}
         <div className="sheet">
           <table className="ss"><tbody>
-            <Band span={4} tag="click a cell to load its column below">Scenarios — net profit after tax</Band>
+            <Band span={4} tag="ARV across · rehab down">Net profit after tax</Band>
           </tbody></table>
-          <div className="sc-wrap">
-            <table className="sc-grid">
-              <thead><tr>
-                <th className="rh">Rehab ↓ &nbsp; ARV →</th>
-                {SCENARIO_KEYS.map(k => (
-                  <th key={k}>ARV {k}<span className="sub">{money0(s.arv[k])} · {psf(s.arv[k], sqft)}</span></th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {grid.map((row, ri) => {
-                  const rk = SCENARIO_KEYS[ri];
-                  return (
-                    <tr key={rk}>
-                      <th className="rh">Rehab {rk}<span className="sub">{money0(s.rehab[rk])} · {psf(s.rehab[rk], sqft)}</span></th>
-                      {row.map(c => {
-                        const on = sel.a === c.arvKey && sel.r === c.rehabKey;
-                        return (
-                          <td key={c.arvKey} className={`${c.result.netProfit < 0 ? 'neg' : 'pos'}${on ? ' sel' : ''}`}>
-                            <button onClick={() => setSel({ a: c.arvKey, r: c.rehabKey })}>
-                              <span className="p">{money(c.result.netProfit)}</span>
-                              <span className="r">{pct(c.result.roi)} · {pct(c.result.annualizedRoi)} ann.</span>
-                            </button>
+          <div style={{ padding: '10px 12px 12px' }}>
+            <div className="hm-wrap">
+              <table className="hm">
+                <thead><tr>
+                  <th className="corner">Rehab ↓ &nbsp; ARV →</th>
+                  {sens.arvAxis.map((a, i) => (
+                    <th key={i}>{money0(a)}<span className="sub">{psf(a, sqft)}</span></th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {sens.cells.map((row, ri) => {
+                    const nearest = (arr: number[], v: number) =>
+                      arr.reduce((best, x, i) => Math.abs(x - v) < Math.abs(arr[best] - v) ? i : best, 0);
+                    const baseR = nearest(sens.rehabAxis, sens.baseRehab);
+                    const baseA = nearest(sens.arvAxis, sens.baseArv);
+                    const over = sens.rehabAxis[ri] - s.rehabEst;
+                    return (
+                      <tr key={ri}>
+                        <th className="rh">{money0(sens.rehabAxis[ri])}
+                          <span className="sub">{over <= 0 ? 'estimate' : `+${money0(over)} over`}</span></th>
+                        {row.map((v, ci) => (
+                          <td key={ci} style={heatColor(v, s.minProfit, sens.min, sens.max)}
+                            className={ri === baseR && ci === baseA ? 'base-cell' : ''}
+                            title={`ARV ${money0(sens.arvAxis[ci])} · rehab ${money0(sens.rehabAxis[ri])} → ${money(v)}`}>
+                            {compact(v)}
                           </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="hm-legend">
+              <span className="k"><i className="sw" style={{ background: `rgb(${LOSS_1.join(',')})` }} />Loses money</span>
+              <span className="k"><i className="sw" style={{ background: `rgb(${WARN_1.join(',')})` }} />Profitable but under your {money0(s.minProfit)} floor</span>
+              <span className="k"><i className="sw" style={{ background: `rgb(${GOOD_1.join(',')})` }} />Clears the floor</span>
+              <span className="k"><i className="box" />Your budget at base ARV</span>
+            </div>
+            <p className="footnote">
+              Rehab runs from spending exactly your {money0(s.rehabEst)} estimate down to burning twice the
+              {' '}{money0(s.rehabBuffer)} buffer, so the budget you are underwriting sits in the middle row.
+              Purchase price ({money0(s.price)}), timeline ({rBase.holdMonths.toFixed(1)} months), financing and
+              the {s.taxPct}% tax rate are held fixed.
+              {city && city.tiers.length > 1 && ' This city has a transfer tax cliff, so expect a step wherever the ARV range crosses it.'}
+            </p>
           </div>
         </div>
 
         <div className="sheet"><table className="ss pl">
-          {/* the band lives in the thead: a browser renders thead before tbody
-              whatever the source order, so a band in its own tbody would sit
-              below these column headers instead of titling them */}
           <thead>
-            <Band span={4} tag={`ARV ${sel.a} — ${money0(s.arv[sel.a])}`}>Deal model</Band>
+            <Band span={4} tag={`rehab budget ${money0(rBase.rehabTotal)}`}>Deal model</Band>
             <tr>
               <th className="lb">Scenario</th>
               {SCENARIO_KEYS.map((k, i) => (
-                <th key={k} className={`n${i === selIdx ? ' on' : ''}`}>{k} rehab<br />{money0(s.rehab[k])}</th>
+                <th key={k} className={`n${i === selIdx ? ' on' : ''}`}>ARV {k}<br />{money0(s.arv[k])}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             <Sec span={4}>Scope &amp; timeline</Sec>
-            <PL label="Rehab incl. contingency" pick={r => r.rehabTotal} fmt={money0} />
+            <PL label="Rehab budget — estimate plus buffer" pick={r => r.rehabTotal} fmt={money0} />
             <PL label="Total hold period — months" pick={r => r.holdMonths} fmt={n => n.toFixed(1)} />
 
             <Sec span={4}>Sale proceeds</Sec>
@@ -755,7 +775,7 @@ export default function FlipPage() {
             <Sec span={4}>Cost into the deal</Sec>
             <PL label="Purchase price" pick={() => s.price} />
             <Fold id="acq" label="Acquisition costs" pick={r => r.acqTotal} lines={cols[selIdx].acqLines} />
-            <PL label="Rehab incl. contingency" pick={r => r.rehabTotal} />
+            <PL label="Rehab budget" pick={r => r.rehabTotal} />
             <Fold id="hold" label="Holding costs" pick={r => r.holdTotal} lines={cols[selIdx].holdLines} />
             <Fold id="fin" label="Financing cost" pick={r => r.finTotal} lines={cols[selIdx].finLines} />
 
@@ -776,86 +796,11 @@ export default function FlipPage() {
             <PL label="Loan payoff at sale" pick={r => r.payoffAtSale} fmt={money0} />
             <PL label="Cash back at close" pick={r => r.cashBackAtClose} fmt={money} />
             {rBase.principalPaid > 0 &&
-              <PL label="Principal repaid — returns at close" pick={r => r.principalPaid} fmt={money0}
-                hint="a balance transfer, not an expense" />}
+              <PL label="Principal repaid — returns at close" pick={r => r.principalPaid} fmt={money0} />}
             {rBase.withholding > 0 &&
-              <PL label="CA withholding at close" pick={r => r.withholding} fmt={money0}
-                hint="a prepayment against the tax above, not an extra cost" />}
+              <PL label="CA withholding at close" pick={r => r.withholding} fmt={money0} />}
           </tbody>
         </table></div>
-      </section>
-
-      {/* ============================================ TAB 3 — SENSITIVITY */}
-      <section className={`pane${tab === 'sensitivity' ? ' on' : ''}`}>
-        <div className="sheet">
-          <table className="ss"><tbody>
-            <Band span={4} tag="ARV across · rehab down">Net profit after tax</Band>
-          </tbody></table>
-          <div style={{ padding: '10px 12px 12px' }}>
-            <div className="hm-wrap">
-              <table className="hm">
-                <thead><tr>
-                  <th className="corner">Rehab ↓ &nbsp; ARV →</th>
-                  {sens.arvAxis.map((a, i) => (
-                    <th key={i}>{money0(a)}<span className="sub">{psf(a, sqft)}</span></th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {sens.cells.map((row, ri) => {
-                    /* a contour marks a CROSSING — the first cell whose
-                       predecessor was on the other side. A row that never
-                       crosses gets no line. */
-                    const cross = (limit: number) =>
-                      row.findIndex((v, i) => i > 0 && v >= limit && row[i - 1] < limit);
-                    const be = cross(0);
-                    const thr = cross(s.minProfit);
-                    const nearest = (arr: number[], v: number) =>
-                      arr.reduce((best, x, i) => Math.abs(x - v) < Math.abs(arr[best] - v) ? i : best, 0);
-                    const baseR = nearest(sens.rehabAxis, sens.baseRehab);
-                    const baseA = nearest(sens.arvAxis, sens.baseArv);
-                    return (
-                      <tr key={ri}>
-                        <th className="rh">{money0(sens.rehabAxis[ri])}
-                          <span className="sub">{psf(sens.rehabAxis[ri], sqft)}</span></th>
-                        {row.map((v, ci) => (
-                          <td key={ci} style={heatColor(v, sens.min, sens.max)}
-                            className={`${be >= 0 && ci === be ? 'be' : ''}${thr >= 0 && ci === thr && thr !== be ? ' thr' : ''}${ri === baseR && ci === baseA ? ' base-cell' : ''}`}
-                            title={`ARV ${money0(sens.arvAxis[ci])} · rehab ${money0(sens.rehabAxis[ri])} → ${money(v)}`}>
-                            {compact(v)}
-                          </td>
-                        ))}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="hm-legend">
-              <span className="k"><i className="bar" />Break-even — $0 net profit</span>
-              <span className="k"><i className="bar d" />Your {money0(s.minProfit)} profit floor</span>
-              <span className="k"><i className="box" />Base case</span>
-            </div>
-            <div className="hm-scale">
-              {Array.from({ length: 24 }, (_, i) => {
-                const v = sens.min + (sens.max - sens.min) * (i / 23);
-                return <i key={i} style={{ background: heatColor(v, sens.min, sens.max).background }} />;
-              })}
-            </div>
-            <div className="hm-scale-lbl">
-              <span>{money(sens.min)}</span>
-              {sens.min < 0 && sens.max > 0 && (
-                <span style={{ position: 'absolute', left: `${(-sens.min / (sens.max - sens.min)) * 100}%`, transform: 'translateX(-50%)' }}>$0</span>
-              )}
-              <span>{money(sens.max)}</span>
-            </div>
-            <p className="footnote">
-              Purchase price ({money0(s.price)}), timeline ({rBase.holdMonths.toFixed(1)} months), financing and the
-              {' '}{s.taxPct}% tax rate are held fixed — a two-variable slice, not a full-deal sensitivity.
-              Axes span your low-to-high scenarios with 10% headroom past each end.
-              {city && city.tiers.length > 1 && ' This city has a transfer tax cliff, so expect a visible step wherever the ARV range crosses it.'}
-            </p>
-          </div>
-        </div>
       </section>
 
       {/* ============================================ TAB 4 — CHECKLIST */}

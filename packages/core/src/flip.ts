@@ -124,8 +124,12 @@ export interface FlipState {
   arv: Triple;
 
   rehabSource: 'manual' | 'checklist';
-  rehab: Triple;
-  contingencyPct: number;
+  /* One estimate plus a dollar buffer, rather than three scenarios. The budget
+     the model spends is est + buffer; the buffer is also what sets the width of
+     the rehab axis on the sensitivity grid, so the number you pick for headroom
+     is the same number the grid stress-tests you against. */
+  rehabEst: number;
+  rehabBuffer: number;
 
   /* timeline — three phases plus an overrun you can dial in */
   rehabMonths: number;
@@ -199,8 +203,8 @@ export function defaultFlipState(): FlipState {
     arv: { low: 1200000, base: 1275000, high: 1340000 },
 
     rehabSource: 'manual',
-    rehab: { low: 180000, base: 220000, high: 285000 },
-    contingencyPct: 10,
+    rehabEst: 220000,
+    rehabBuffer: 40000,
 
     rehabMonths: 5,
     domDays: 21,
@@ -269,8 +273,8 @@ export interface CostLine {
 
 export interface FlipResult {
   sale: number;
-  rehabBase: number;
-  contingency: number;
+  rehabEst: number;
+  rehabBuffer: number;
   rehabTotal: number;
 
   rehabPeriod: number;
@@ -324,16 +328,18 @@ export interface FlipResult {
 /* ------------------------------------------------------------------ compute */
 
 export function computeFlip(
-  s: FlipState, arvKey: ScenarioKey = 'base', rehabKey: ScenarioKey = 'base',
-  priceOverride?: number,
+  s: FlipState, arvKey: ScenarioKey = 'base',
+  rehabOverride?: number, priceOverride?: number,
 ): FlipResult {
   const city = findCity(s.citySlug);
   const price = priceOverride ?? s.price;
   const sale = s.arv[arvKey] || 0;
 
-  const rehabBase = s.rehab[rehabKey] || 0;
-  const contingency = rehabBase * (s.contingencyPct / 100);
-  const rehabTotal = rehabBase + contingency;
+  const rehabEst = s.rehabEst || 0;
+  const rehabBuffer = s.rehabBuffer || 0;
+  /* the sensitivity grid probes a rehab number directly; everything else
+     spends the budget, which is the estimate plus its buffer */
+  const rehabTotal = rehabOverride ?? (rehabEst + rehabBuffer);
 
   const rehabPeriod = Math.max(0, s.rehabMonths + s.overrunMonths);
   const marketMonths = Math.max(0, (s.domDays + s.escrowDays) / DAYS_PER_MONTH);
@@ -501,7 +507,7 @@ export function computeFlip(
 
   const sqft = s.prop.sqft || 0;
   return {
-    sale, rehabBase, contingency, rehabTotal,
+    sale, rehabEst, rehabBuffer, rehabTotal,
     rehabPeriod, marketMonths, holdMonths,
     acqLines, acqTotal,
     holdLines, holdTotal, holdMonthly, propertyTax, supplementalTax,
@@ -522,18 +528,6 @@ export function computeFlip(
   };
 }
 
-/* ------------------------------------------------------------------ the 3x3 */
-
-export interface GridCell {
-  arvKey: ScenarioKey; rehabKey: ScenarioKey;
-  result: FlipResult;
-}
-
-export function computeGrid(s: FlipState): GridCell[][] {
-  return SCENARIO_KEYS.map(rehabKey =>
-    SCENARIO_KEYS.map(arvKey => ({ arvKey, rehabKey, result: computeFlip(s, arvKey, rehabKey) })));
-}
-
 /* ------------------------------------------------------------------- solvers */
 
 /** Profit is monotonically decreasing in price but genuinely steps at transfer
@@ -541,7 +535,7 @@ export function computeGrid(s: FlipState): GridCell[][] {
 export function solveMAO(s: FlipState): number {
   const target = s.minProfit;
   const profitAt = (p: number) => {
-    const r = computeFlip(s, 'base', 'base', p);
+    const r = computeFlip(s, 'base', undefined, p);
     return (s.minProfitBasis === 'pre' ? r.preTaxProfit : r.netProfit) - target;
   };
   let lo = 0, hi = Math.max(s.arv.base, 1);
@@ -556,7 +550,7 @@ export function solveMAO(s: FlipState): number {
 
 /** The 70% rule, as a cross-check rather than a verdict. */
 export function seventyRule(s: FlipState): number {
-  return 0.70 * s.arv.base - s.rehab.base;
+  return 0.70 * s.arv.base - (s.rehabEst + s.rehabBuffer);
 }
 
 /* --------------------------------------------------------------- sensitivity */
@@ -583,18 +577,26 @@ function axis(t: Triple, n: number): number[] {
   return Array.from({ length: n }, (_, i) => from + step * i);
 }
 
+/** The rehab axis runs from spending exactly your estimate to burning twice
+    your buffer, which puts the budget you are actually underwriting — estimate
+    plus buffer — dead centre. Coming in under estimate is not a case worth
+    reserving grid space for. */
 export function buildSensitivity(s: FlipState, n = 7): Sensitivity {
+  const est = s.rehabEst || 0;
+  const buffer = s.rehabBuffer || Math.abs(est) * 0.1 || 1;
+  const step = (2 * buffer) / (n - 1);
+  const rehabAxis = Array.from({ length: n }, (_, i) => est + step * i);
   const arvAxis = axis(s.arv, n);
-  const rehabAxis = axis(s.rehab, n);
+
   let min = Infinity, max = -Infinity;
   const cells = rehabAxis.map(rehab => arvAxis.map(arv => {
-    const probe: FlipState = { ...s, arv: { low: arv, base: arv, high: arv }, rehab: { low: rehab, base: rehab, high: rehab } };
-    const v = computeFlip(probe, 'base', 'base').netProfit;
+    const probe: FlipState = { ...s, arv: { low: arv, base: arv, high: arv } };
+    const v = computeFlip(probe, 'base', rehab).netProfit;
     if (v < min) min = v;
     if (v > max) max = v;
     return v;
   }));
-  return { arvAxis, rehabAxis, cells, min, max, baseArv: s.arv.base, baseRehab: s.rehab.base };
+  return { arvAxis, rehabAxis, cells, min, max, baseArv: s.arv.base, baseRehab: est + buffer };
 }
 
 /* ------------------------------------------------------------------ verdicts */
