@@ -6,3 +6,4 @@ export * from './sync';
 export * from './bayAreaCities';
 export * from './flip';
 export * from './flipCatalog';
+export * from './market';

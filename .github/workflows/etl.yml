@@ -1,0 +1,81 @@
+name: Refresh market data
+
+on:
+  schedule:
+    # 13:00 UTC on the 3rd, 18th and 23rd of each month (06:00 Pacific).
+    #
+    # Three runs, because the two publishers land on different days and neither
+    # is exact: Realtor.com posts the closed month within a few days of month
+    # end, Zillow posts around the middle of the month. The 23rd is the retry
+    # for a Zillow release that slipped. Upsert makes a redundant run a no-op,
+    # so over-running is free and under-running shows a client stale numbers.
+    - cron: '0 13 3,18,23 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-etl
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # No pip install step and no requirements.txt — the ETL is stdlib only,
+      # deliberately. See the header of etl/load.py.
+      - name: Pull and load
+        run: python3 etl/run.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+  # A failed scheduled workflow is easy to not notice for a month, which is
+  # exactly as long as it takes for the dashboard to be confidently wrong. This
+  # opens an issue on failure, which GitHub emails. The dashboard's own staleness
+  # banner is the second line of defence; this is the first.
+  alert:
+    needs: refresh
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Market data ETL failed';
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'etl',
+            });
+            const body = [
+              `The market data refresh failed on ${new Date().toISOString().slice(0, 10)}.`,
+              '',
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              '',
+              'Most likely cause, in order:',
+              '1. A publisher moved or renamed a file (the old URL usually still returns 200 with stale data).',
+              '2. A freshness check tripped because a release slipped — check the dates before raising the threshold in etl/sources.py.',
+              '3. Supabase credentials expired or the project was paused.',
+            ].join('\n');
+            // One issue per outage, not one per run — reopen the conversation
+            // rather than filing a duplicate every scheduled attempt.
+            if (open.length) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: open[0].number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['etl'],
+              });
+            }
