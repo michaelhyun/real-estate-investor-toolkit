@@ -752,8 +752,10 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
 /* ---------- the guidance column ---------- */
 .ss td.note { display:none; }
 .ss.with-notes td.note {
-  display:table-cell; width:38%; font-size:11px; line-height:1.45; color:var(--ink-soft);
-  border-left:1px solid var(--line); padding:4px 11px; vertical-align:top;
+  display:table-cell; width:auto; font-size:10.5px; line-height:1.25; color:var(--ink-soft);
+  border-left:1px solid var(--line); padding:1px 9px; vertical-align:middle;
+  /* one line, always — a wrapping note is what makes a row tall */
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .ss td.note b { color:var(--ink); font-weight:600; }
 .ss td.note .ok   { color:var(--accent-strong); font-weight:700; }
@@ -763,19 +765,23 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
 /* a section-wide note, spanning under its header */
 .ss tr.guide td {
   background:#faf8f3; border-bottom:1px solid var(--line-strong);
-  font-size:11px; line-height:1.5; color:var(--ink-soft); padding:7px 11px;
+  font-size:10.5px; line-height:1.3; color:var(--ink-soft); padding:3px 9px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .ss tr.guide td b { color:var(--ink); font-weight:700; }
 @media (max-width: 1080px) { .ss td.note { display:none; } }
-.ss { width:100%; border-collapse:collapse; font-size:12.5px; }
-.ss td, .ss th { padding:3px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
+.ss { width:100%; border-collapse:collapse; font-size:12px; line-height:1.25; }
+.ss td, .ss th { padding:1px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+/* fixed widths keep the inputs tight to the left and give every remaining
+   pixel to the guidance column */
+.ss.with-notes { table-layout:fixed; }
 .ss tr:last-child td { border-bottom:none; }
 
 /* title band — one per sheet */
 .ss tr.band td {
   background:var(--accent); color:#fff; font-family:var(--sans);
-  font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
-  padding:7px 10px; border-bottom:none;
+  font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  padding:4px 8px; border-bottom:none;
 }
 .ss tr.band td .tag {
   float:right; font-family:var(--mono); font-weight:500; letter-spacing:.02em;
@@ -783,8 +789,8 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
 }
 /* section rule inside a sheet */
 .ss tr.sec td {
-  background:#f1efea; color:var(--ink-soft); font-size:9.5px; font-weight:700;
-  letter-spacing:.07em; text-transform:uppercase; padding:5px 10px;
+  background:#f1efea; color:var(--ink-soft); font-size:9px; font-weight:700;
+  letter-spacing:.07em; text-transform:uppercase; padding:2px 8px;
   border-top:1px solid var(--line-strong); border-bottom:1px solid var(--line-strong);
 }
 /* Hover only the plain data rows. The earlier blanket rule repainted the
@@ -797,31 +803,37 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
 .ss td.lb .sub { display:block; font-size:10.5px; color:var(--ink-faint); line-height:1.35; margin-top:1px; }
 .ss td.n {
   text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums;
-  white-space:nowrap; width:118px;
+  white-space:nowrap; width:104px;
 }
 .ss td.u {
-  font-family:var(--mono); font-size:10.5px; color:var(--ink-faint);
-  white-space:nowrap; width:74px; text-align:left; padding-left:6px;
+  font-family:var(--mono); font-size:10px; color:var(--ink-faint);
+  white-space:nowrap; width:54px; text-align:left; padding-left:5px;
+  overflow:hidden;
 }
+.ss td.lb { width:228px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ss.with-notes td.lb { width:228px; }
 .ss td.neg { color:var(--neg); }
 .ss td.pos { color:var(--accent-strong); }
 
 /* subtotal / grand total */
 .ss tr.tot td { font-weight:700; background:var(--accent-soft); border-top:1px solid var(--line-strong); }
 .ss tr.grand td {
-  font-weight:700; font-size:14px; background:var(--accent-soft);
-  border-top:2px solid var(--ink); border-bottom:none; padding:7px 10px;
+  font-weight:700; font-size:12.5px; background:var(--accent-soft);
+  border-top:2px solid var(--ink); border-bottom:none; padding:3px 8px;
 }
 .ss tr.rule td { border-top:1px solid var(--ink-faint); }
 
 /* inputs sit flush in the cell */
 .ss .num {
-  width:100%; padding:3px 7px; font-size:12.5px; height:26px;
-  border-radius:5px; background:#fdfcfa;
+  width:100%; padding:0 6px; font-size:11.5px; height:19px;
+  border-radius:4px; background:#fdfcfa;
 }
+.ss .sel-city { padding:0 5px; height:19px; font-size:11px; border-radius:4px; }
+.ss input.num.small { width:100%; }
 .ss td.n .inline-input { justify-content:flex-end; gap:4px; }
-.ss .unit-toggle button { padding:3px 7px; font-size:10.5px; }
-.ss .switch { transform:scale(.85); transform-origin:right center; }
+.ss .unit-toggle { height:19px; }
+.ss .unit-toggle button { padding:0 6px; font-size:9.5px; line-height:17px; }
+.ss .switch { transform:scale(.68); transform-origin:right center; }
 .ss td.ctl { text-align:right; width:auto; }
 
 /* ---------- P&L with a column per scenario ---------- */
