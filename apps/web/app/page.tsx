@@ -10,6 +10,10 @@ const CARDS = [
     desc: 'Full monthly payment breakdown with taxes, insurance and PMI, an amortization schedule, and extra-payment payoff savings.',
   },
   {
+    href: '/flip', ic: '🔨', title: 'Flip Analyzer',
+    desc: 'Bay Area fix-and-flip underwriting — a rehab × ARV scenario grid, a profit sensitivity heatmap, city transfer tax presets, and a trade-by-trade cost checklist that builds your scope of work.',
+  },
+  {
     href: '/portfolio', ic: '📊', title: 'Portfolio ROE Dashboard',
     desc: 'Every rental you own in one view — cash-on-cash, return on equity, a performance leaderboard, and lazy-equity alerts.',
   },
@@ -36,7 +40,7 @@ export default function Home() {
           <span className="badge">Coming soon</span>
           <div className="ic">🛠️</div>
           <h3>More tools</h3>
-          <p>Sales &amp; rental comps, CapEx tracker, neighborhood research, BRRRR analyzer, flip calculator and more — the toolkit keeps growing.</p>
+          <p>Sales &amp; rental comps, CapEx tracker, neighborhood research, BRRRR analyzer and more — the toolkit keeps growing.</p>
         </div>
       </div>
 

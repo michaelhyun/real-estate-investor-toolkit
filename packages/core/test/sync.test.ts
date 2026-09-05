@@ -8,7 +8,7 @@ import { defaultDealState, type DealState } from '../src/rental';
 const deal = (name: string, savedAt?: string, price = 100000): DealState =>
   ({ ...defaultDealState(), name, price, savedAt });
 
-const row = (d: DealState, updated_at = '2020-01-01T00:00:00.000Z'): RemoteDealRecord =>
+const row = (d: DealState, updated_at = '2020-01-01T00:00:00.000Z'): RemoteDealRecord<DealState> =>
   ({ name: d.name, data: d, updated_at });
 
 const names = (ds: DealState[]) => ds.map(d => d.name).sort();

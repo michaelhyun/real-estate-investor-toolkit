@@ -9,34 +9,42 @@
    back on the next sync from device B, which is the right trade: a resurrected
    deal is an annoyance, a vaporized one is data loss. */
 
-import type { DealState } from './rental';
-
-export interface RemoteDealRecord {
+/** The only shape the merge needs. Every tool's deal state satisfies it, which
+    is what lets one merge rule serve the rental analyzer and the flip analyzer
+    without either knowing about the other. */
+export interface SyncableDeal {
   name: string;
-  data: DealState;
+  savedAt?: string;
+}
+
+export interface RemoteDealRecord<T extends SyncableDeal = SyncableDeal> {
+  name: string;
+  data: T;
   updated_at: string;
 }
 
-export interface MergeResult {
+export interface MergeResult<T extends SyncableDeal = SyncableDeal> {
   /** the full set to write back to local storage */
-  merged: DealState[];
+  merged: T[];
   /** the subset the account is missing or has an older copy of */
-  toPush: DealState[];
+  toPush: T[];
 }
 
 /* `savedAt` is the deal's own stamp and travels with it; `updated_at` is the
    row's. Prefer the former and fall back to the latter for rows written before
    a deal carried a stamp. Unparseable or missing → 0, i.e. loses any real date. */
-function stamp(deal: DealState | undefined, fallback?: string): number {
+function stamp(deal: SyncableDeal | undefined, fallback?: string): number {
   const t = Date.parse(deal?.savedAt || '');
   if (!Number.isNaN(t)) return t;
   const f = Date.parse(fallback || '');
   return Number.isNaN(f) ? 0 : f;
 }
 
-export function mergeDeals(local: DealState[], remote: RemoteDealRecord[]): MergeResult {
-  const merged: DealState[] = [];
-  const toPush: DealState[] = [];
+export function mergeDeals<T extends SyncableDeal>(
+  local: T[], remote: RemoteDealRecord<T>[],
+): MergeResult<T> {
+  const merged: T[] = [];
+  const toPush: T[] = [];
   const remoteByName = new Map(remote.map(r => [r.name, r]));
   const localNames = new Set(local.map(d => d.name));
 

@@ -11,6 +11,8 @@ export const TOOLS = [
     desc: 'Cash flow, cash-on-cash, DSCR & 5-year pro-forma' },
   { id: 'mortgage', name: 'Mortgage Calculator', href: '/mortgage',
     desc: 'Payment breakdown, amortization & extra-payment savings' },
+  { id: 'flip', name: 'Flip Analyzer', href: '/flip',
+    desc: 'Scenarios, sensitivity & a trade-by-trade rehab checklist' },
   { id: 'portfolio', name: 'Portfolio ROE Dashboard', href: '/portfolio',
     desc: 'Equity, cash flow & return on equity across your rentals' },
 ];

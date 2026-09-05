@@ -17,10 +17,13 @@ import { buildRentalReport } from '../../components/report';
 import { AddressInput } from '../../components/AddressInput';
 import { toast } from '../../components/toast';
 import { useAuth } from '../../components/auth';
-import { fetchDeals, pushDeals, deleteRemoteDeal, mergeDeals } from '../../lib/dealsync';
+import { dealStore, mergeDeals } from '../../lib/dealsync';
 
 const STORE_KEY = 'rentalDeals.v3';
 const DRAFT_KEY = 'rentalCalc.draft.v3';
+
+/* the account-side store for this tool — 'rental' is named once, here */
+const cloud = dealStore<DealState>('rental');
 
 /* merge a stored deal/draft into a full DealState with the original fallbacks */
 function normalizeDeal(d: any): DealState {
@@ -116,12 +119,12 @@ export default function RentalPage() {
     syncedFor.current = user.id;
     (async () => {
       try {
-        const remote = await fetchDeals();
+        const remote = await cloud.fetch();
         const { merged, toPush } = mergeDeals(savedDeals, remote);
         const deals = merged.map(normalizeDeal);
         setSavedDeals(deals);
         saveJSON(STORE_KEY, deals);
-        if (toPush.length) await pushDeals(user.id, toPush);
+        if (toPush.length) await cloud.push(user.id, toPush);
         if (remote.length || toPush.length) toast('Deals synced with your account');
       } catch {
         syncedFor.current = null;
@@ -193,7 +196,7 @@ export default function RentalPage() {
     setSavedDeals(deals);
     saveJSON(STORE_KEY, deals);
     toast(i >= 0 ? 'Deal updated' : 'Deal saved');
-    if (user) pushDeals(user.id, [deal]).catch(() => toast('Saved on this device — cloud sync failed'));
+    if (user) cloud.push(user.id, [deal]).catch(() => toast('Saved on this device — cloud sync failed'));
   }
 
   function deleteDeal(name: string) {
@@ -201,7 +204,7 @@ export default function RentalPage() {
     const deals = savedDeals.filter(d => d.name !== name);
     setSavedDeals(deals);
     saveJSON(STORE_KEY, deals);
-    if (user) deleteRemoteDeal(name).catch(() => toast('Removed on this device — cloud delete failed'));
+    if (user) cloud.remove(name).catch(() => toast('Removed on this device — cloud delete failed'));
   }
 
   function reset() {
