@@ -5,5 +5,5 @@ export * from './portfolio';
 export * from './sync';
 export * from './bayAreaCities';
 export * from './flip';
-export * from './flipCatalog';
+export * from './sow';
 export * from './market';

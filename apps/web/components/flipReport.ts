@@ -4,8 +4,9 @@
 
 import {
   money, money0, pct, computeFlip, solveMAO, seventyRule, verdictFor,
-  SCENARIO_KEYS, findCity, CATALOG, seededQty, computeChecklist,
-  type FlipState, type ScenarioKey, type QtyContext,
+  SCENARIO_KEYS, findCity,
+  buildSpaces, computeSow, taskQty, taskKey, DEF_BY_KIND,
+  type FlipState, type PropertyShape,
 } from '@reit/core';
 import { REPORT_CSS, escapeHtml } from './ui';
 
@@ -120,32 +121,34 @@ Property tax assumes Prop 13 reassessment to the purchase price. Flip profit is 
 export function buildScopeOfWork(
   s: FlipState, catalogPrices: Record<string, number>,
 ): string {
-  const ctx: QtyContext = {
+  const p: PropertyShape = {
     sqft: s.prop.sqft, beds: s.prop.beds, baths: s.prop.baths,
     halfBaths: s.prop.halfBaths, stories: s.prop.stories, garageBays: s.prop.garageBays,
   };
-  const totals = computeChecklist(s.checked, s.qty, catalogPrices, ctx);
-  const priceOf = (id: string, k: 'low' | 'base' | 'high', fallback: number) =>
-    catalogPrices[`${id}.${k}`] !== undefined ? catalogPrices[`${id}.${k}`] : fallback;
+  const spaces = buildSpaces(p).map(sp => ({ ...sp, sqft: s.spaceSqft[sp.id] ?? sp.sqft }));
+  const totals = computeSow(spaces, s.checked, s.qty, catalogPrices, p);
+  const priceOf = (kind: string, id: string, fallback: number) =>
+    catalogPrices[`${kind}.${id}.base`] ?? fallback;
 
-  const secHtml = CATALOG.map(sec => {
-    const items = sec.items.filter(i => s.checked[i.id]);
-    if (!items.length) return '';
-    const t = totals.sections.find(x => x.id === sec.id)!;
-    return `<h2>${escapeHtml(sec.label)}</h2>
+  const secHtml = spaces.map(sp => {
+    const def = DEF_BY_KIND[sp.kind];
+    const tasks = def.tasks.filter(t => s.checked[taskKey(sp.id, t.id)]);
+    if (!tasks.length) return '';
+    const tot = totals.spaces.find(x => x.id === sp.id)!;
+    return `<h2>${escapeHtml(sp.label)}${sp.room && sp.sqft ? ` <span class="s">${sp.sqft} sf</span>` : ''}</h2>
 <table>
-  <tr><th>Item</th><th class="c">Qty</th><th class="c">Unit</th><th class="c">Est. cost</th></tr>
-  ${items.map(i => {
-    const q = s.qty[i.id] !== undefined ? s.qty[i.id] : seededQty(i, ctx);
-    const cost = i.pctOfHard
-      ? totals.hardBase * priceOf(i.id, 'base', i.base) / 100
-      : q * priceOf(i.id, 'base', i.base);
-    return `<tr><td>${escapeHtml(i.desc)}${i.note ? `<br><span class="s">${escapeHtml(i.note)}</span>` : ''}</td>` +
-      `<td class="c">${i.pctOfHard ? '—' : q}</td>` +
-      `<td class="c">${i.pctOfHard ? `${priceOf(i.id, 'base', i.base)}% of hard` : escapeHtml(i.unit)}</td>` +
+  <tr><th>Task</th><th class="c">Qty</th><th class="c">Unit</th><th class="c">Est. cost</th></tr>
+  ${tasks.map(t => {
+    const key = taskKey(sp.id, t.id);
+    const q = s.qty[key] !== undefined ? s.qty[key] : taskQty(t, sp, p);
+    const price = priceOf(sp.kind, t.id, t.base);
+    const cost = t.pctOfHard ? totals.hardBase * price / 100 : q * price;
+    return `<tr><td>${escapeHtml(t.desc)}${t.note ? `<br><span class="s">${escapeHtml(t.note)}</span>` : ''}</td>` +
+      `<td class="c">${t.pctOfHard ? '—' : q}</td>` +
+      `<td class="c">${t.pctOfHard ? `${price}% of hard` : escapeHtml(t.unit)}</td>` +
       `<td class="c">${money0(cost)}</td></tr>`;
   }).join('')}
-  <tr class="sub"><td colspan="3">${escapeHtml(sec.label)} subtotal</td><td class="c">${money0(t.base)}</td></tr>
+  <tr class="sub"><td colspan="3">${escapeHtml(sp.label)} subtotal</td><td class="c">${money0(tot.base)}</td></tr>
 </table>`;
   }).join('');
 
@@ -179,15 +182,15 @@ export function buildScopeOfWork(
   <h1>Scope of Work</h1>
   <div class="meta">${escapeHtml(title(s))} &nbsp;·&nbsp; ${s.prop.beds} bd / ${s.prop.baths} ba${s.prop.halfBaths ? ` + ${s.prop.halfBaths} half` : ''} &nbsp;·&nbsp; ${s.prop.sqft.toLocaleString()} sqft &nbsp;·&nbsp; Prepared ${today()}</div>
 </header>
-${secHtml || '<p><em>No items selected.</em></p>'}
+${secHtml || '<p><em>Nothing scoped yet.</em></p>'}
 <div class="range">
   <table>
-    <tr><td>Low estimate</td><td class="c">${money0(totals.low)}</td><td class="c">${s.prop.sqft > 0 ? money0(totals.low / s.prop.sqft) + '/sf' : ''}</td></tr>
-    <tr><td>Base estimate</td><td class="c">${money0(totals.base)}</td><td class="c">${s.prop.sqft > 0 ? money0(totals.base / s.prop.sqft) + '/sf' : ''}</td></tr>
-    <tr><td>High estimate</td><td class="c">${money0(totals.high)}</td><td class="c">${s.prop.sqft > 0 ? money0(totals.high / s.prop.sqft) + '/sf' : ''}</td></tr>
+    <tr><td>Rental grade</td><td class="c">${money0(totals.low)}</td><td class="c">${s.prop.sqft > 0 ? money0(totals.low / s.prop.sqft) + '/sf' : ''}</td></tr>
+    <tr><td>Standard</td><td class="c">${money0(totals.base)}</td><td class="c">${s.prop.sqft > 0 ? money0(totals.base / s.prop.sqft) + '/sf' : ''}</td></tr>
+    <tr><td>High-end</td><td class="c">${money0(totals.high)}</td><td class="c">${s.prop.sqft > 0 ? money0(totals.high / s.prop.sqft) + '/sf' : ''}</td></tr>
   </table>
 </div>
-<p class="note">Owner estimates for bidding purposes, not a quote. Contractor to verify all quantities, field conditions, materials and pricing, and to itemize any exclusions in the bid. Costs shown are the base estimate; the low and high figures bracket the expected range. Permits and general conditions are listed where they appear in the scope above.</p>
+<p class="note">Owner estimates for bidding purposes, not a quote. Contractor to verify all quantities, field conditions, materials and pricing, and to itemise any exclusions in the bid. Costs shown are the standard grade; the rental and high-end figures bracket the expected range. Permits, general conditions and contingency appear under their own heading where scoped.</p>
 <div class="sign"><div>Owner — Date</div><div>Contractor — Date</div></div>
 </body></html>`;
 }

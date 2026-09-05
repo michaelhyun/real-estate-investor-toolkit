@@ -174,12 +174,16 @@ export interface FlipState {
   minProfit: number;
   minProfitBasis: 'after' | 'pre';
 
-  /* Checklist selections only. Prices are NOT here: the catalog is shared
-     across every deal so a corrected price propagates instead of needing to be
-     re-fixed forever. A deal owns what is specific to it — what is checked and
-     any quantity override — and nothing else. */
+  /* Scope-of-work selections only, keyed `<spaceId>.<taskId>`. Prices are NOT
+     here: the catalog is shared across every deal so a corrected price
+     propagates instead of needing to be re-fixed forever. A deal owns what is
+     specific to it — what is scoped, room areas and quantity overrides. */
   checked: Record<string, boolean>;
   qty: Record<string, number>;
+  /** per-room area overrides, keyed by space id */
+  spaceSqft: Record<string, number>;
+  /** the level preset last applied to each space, keyed by space id */
+  spaceLevel: Record<string, number>;
 }
 
 const seed = (items: LineDef[]): Record<string, number> =>
@@ -248,6 +252,8 @@ export function defaultFlipState(): FlipState {
 
     checked: {},
     qty: {},
+    spaceSqft: {},
+    spaceLevel: {},
   };
 }
 

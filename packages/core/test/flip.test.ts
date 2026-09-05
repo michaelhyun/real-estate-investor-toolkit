@@ -10,7 +10,10 @@ import {
   buildSensitivity, type FlipState,
 } from '../src/flip';
 import { cityTransferTax, findCity, countyTransferTax } from '../src/bayAreaCities';
-import { computeChecklist, CATALOG, ITEM_BY_ID, seededQty, type QtyContext } from '../src/flipCatalog';
+import {
+  buildSpaces, computeSow, applyLevel, taskKey, taskQty, SPACE_DEFS, DEF_BY_KIND,
+  type PropertyShape, type SpaceInstance,
+} from '../src/sow';
 
 const base = (over: Partial<FlipState> = {}): FlipState => ({ ...defaultFlipState(), ...over });
 const near = (a: number, b: number, tol = 0.5) => expect(Math.abs(a - b)).toBeLessThan(tol);
@@ -285,131 +288,230 @@ describe('returns', () => {
   });
 });
 
-describe('cost checklist', () => {
-  const ctx: QtyContext = { sqft: 1450, beds: 3, baths: 2, halfBaths: 1, stories: 1, garageBays: 2 };
+describe('scope of work', () => {
+  const prop: PropertyShape = { sqft: 1450, beds: 3, baths: 2, halfBaths: 1, stories: 1, garageBays: 2 };
+  const spaces = buildSpaces(prop);
+  const find = (id: string) => spaces.find(x => x.id === id)!;
+  const sow = (checked: Record<string, boolean>, qty = {}, prices = {}) =>
+    computeSow(spaces, checked, qty, prices, prop);
+  const on = (keys: string[]) => Object.fromEntries(keys.map(k => [k, true]));
 
-  it('every item id is unique across the whole catalog', () => {
-    const ids = CATALOG.flatMap(s => s.items.map(i => i.id));
-    expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it('every item prices low <= base <= high', () => {
-    for (const i of CATALOG.flatMap(s => s.items)) {
-      expect(i.low).toBeLessThanOrEqual(i.base);
-      expect(i.base).toBeLessThanOrEqual(i.high);
+  it('generates one space per actual room, plus the whole-property sections', () => {
+    expect(spaces.filter(x => x.kind === 'bedroom')).toHaveLength(3);
+    expect(spaces.filter(x => x.kind === 'bathroom')).toHaveLength(2);
+    expect(spaces.filter(x => x.kind === 'halfbath')).toHaveLength(1);
+    expect(spaces.filter(x => x.kind === 'garage')).toHaveLength(1);
+    /* every non-room section appears exactly once */
+    for (const d of SPACE_DEFS.filter(d => !d.room)) {
+      expect(spaces.filter(x => x.kind === d.kind)).toHaveLength(1);
     }
   });
 
-  it('seeds room-driven quantities from the property', () => {
-    /* one check on "tile shower surround" prices all the bathrooms */
-    near(seededQty(ITEM_BY_ID['tile-shower'], ctx), 2);
-    near(seededQty(ITEM_BY_ID['tile-shower'], { ...ctx, baths: 4 }), 4);
-    /* half-bath items follow their own driver */
-    near(seededQty(ITEM_BY_ID['plumb-halfbath'], ctx), 1);
-    /* sqft-driven items scale with area */
-    near(seededQty(ITEM_BY_ID['paint-int-walls'], ctx), 1450);
+  it('numbers repeated rooms and leaves singletons unnumbered', () => {
+    expect(find('bedroom-2').label).toBe('Bedroom 2');
+    expect(find('kitchen-1').label).toBe('Kitchen');
   });
 
-  it('unchecked items contribute nothing', () => {
-    const t = computeChecklist({}, {}, {}, ctx);
-    near(t.base, 0);
-    expect(t.checkedCount).toBe(0);
+  it('drops the garage when there are no bays', () => {
+    expect(buildSpaces({ ...prop, garageBays: 0 }).some(x => x.kind === 'garage')).toBe(false);
   });
 
-  it('totals a checked item as quantity times unit cost', () => {
-    const t = computeChecklist({ 'tile-shower': true }, {}, {}, ctx);
-    const i = ITEM_BY_ID['tile-shower'];
-    near(t.base, 2 * i.base);
-    near(t.low, 2 * i.low);
-    near(t.high, 2 * i.high);
+  it('seeds each room area from a share of the house', () => {
+    expect(find('bedroom-1').sqft).toBe(Math.round(1450 * 0.11));
+    expect(find('kitchen-1').sqft).toBe(Math.round(1450 * 0.12));
+    /* the garage is sized off bays, not off living area */
+    expect(find('garage-1').sqft).toBe(400);
+  });
+
+  it('every task id is unique inside its own space', () => {
+    for (const d of SPACE_DEFS) {
+      const ids = d.tasks.map(t => t.id);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+  });
+
+  it('every task prices low <= base <= high', () => {
+    for (const d of SPACE_DEFS) for (const t of d.tasks) {
+      expect(t.low).toBeLessThanOrEqual(t.base);
+      expect(t.base).toBeLessThanOrEqual(t.high);
+    }
+  });
+
+  it('scales room-area tasks by that room, not the whole house', () => {
+    const bed = find('bedroom-1');
+    const paint = DEF_BY_KIND.bedroom.tasks.find(t => t.id === 'paint')!;
+    expect(taskQty(paint, bed, prop)).toBe(bed.sqft);
+    expect(taskQty(paint, bed, prop)).toBeLessThan(prop.sqft);
+  });
+
+  it('scales whole-house tasks by the house', () => {
+    const rewire = DEF_BY_KIND.electrical.tasks.find(t => t.id === 'rewire')!;
+    expect(taskQty(rewire, find('electrical'), prop)).toBe(prop.sqft);
+  });
+
+  it('prices the same task once per room instance', () => {
+    const oneBath = sow(on([taskKey('bathroom-1', 'shower-tile')]));
+    const twoBaths = sow(on([taskKey('bathroom-1', 'shower-tile'), taskKey('bathroom-2', 'shower-tile')]));
+    near(twoBaths.base, oneBath.base * 2);
+  });
+
+  it('a level preset scopes a room in one move', () => {
+    const bath = find('bathroom-1');
+    const gutted = applyLevel(bath, 3, {});
+    const t = sow(gutted);
+    expect(t.checkedCount).toBeGreaterThan(8);
+    /* demo to studs is gut-only; a refresh must not include it */
+    expect(gutted[taskKey('bathroom-1', 'demo')]).toBe(true);
+    expect(applyLevel(bath, 1, {})[taskKey('bathroom-1', 'demo')]).toBeUndefined();
+  });
+
+  it('levels get dearer as they get deeper', () => {
+    const bath = find('bathroom-1');
+    const cost = (lv: 1 | 2 | 3) => sow(applyLevel(bath, lv, {})).base;
+    expect(cost(1)).toBeLessThan(cost(2));
+    expect(cost(2)).toBeLessThan(cost(3));
+  });
+
+  it('level 0 clears the space and only that space', () => {
+    let c = applyLevel(find('bathroom-1'), 3, {});
+    c = applyLevel(find('bathroom-2'), 3, c);
+    c = applyLevel(find('bathroom-1'), 0, c);
+    expect(Object.keys(c).some(k => k.startsWith('bathroom-1.'))).toBe(false);
+    expect(Object.keys(c).some(k => k.startsWith('bathroom-2.'))).toBe(true);
+  });
+
+  it('applying a level replaces the previous one rather than adding to it', () => {
+    const bath = find('bathroom-1');
+    const after = applyLevel(bath, 1, applyLevel(bath, 3, {}));
+    expect(after[taskKey('bathroom-1', 'demo')]).toBeUndefined();
+  });
+
+  it('reports spaces with nothing scoped, so a blank room is a decision', () => {
+    const t = sow(applyLevel(find('kitchen-1'), 2, {}));
+    expect(t.emptySpaces).toContain('Bedroom 1');
+    expect(t.emptySpaces).not.toContain('Kitchen');
+  });
+
+  it('reports commonly-missed lines that are still unscoped', () => {
+    const t = sow({});
+    const descs = t.missedUnchecked.map(m => m.desc).join(' | ');
+    expect(descs).toMatch(/sewer lateral/i);
+    expect(descs).toMatch(/panel upgrade/i);
+    expect(descs).toMatch(/contingency/i);
+  });
+
+  it('stops reporting a missed line once it is scoped', () => {
+    const key = taskKey('plumbing', 'lateral');
+    expect(sow(on([key])).missedUnchecked.some(m => m.key === key)).toBe(false);
   });
 
   it('honours a quantity override', () => {
-    const t = computeChecklist({ 'tile-shower': true }, { 'tile-shower': 5 }, {}, ctx);
-    near(t.base, 5 * ITEM_BY_ID['tile-shower'].base);
+    const key = taskKey('bedroom-1', 'recessed');
+    near(sow(on([key]), { [key]: 10 }).base,
+         10 * DEF_BY_KIND.bedroom.tasks.find(t => t.id === 'recessed')!.base);
   });
 
-  it('honours a per-deal price override without touching the catalog', () => {
-    const t = computeChecklist({ 'tile-shower': true }, {}, { 'tile-shower.base': 9999 }, ctx);
-    near(t.base, 2 * 9999);
-    /* the shared catalog is untouched, so other deals are unaffected */
-    expect(ITEM_BY_ID['tile-shower'].base).not.toBe(9999);
+  it('honours a shared price override without touching the catalog', () => {
+    const key = taskKey('bathroom-1', 'toilet');
+    near(sow(on([key]), {}, { 'bathroom.toilet.base': 9999 }).base, 9999);
+    expect(DEF_BY_KIND.bathroom.tasks.find(t => t.id === 'toilet')!.base).not.toBe(9999);
   });
 
-  it('applies GC fee against hard costs and never against itself', () => {
-    const hardOnly = computeChecklist({ 'tile-shower': true }, {}, {}, ctx);
-    const withGc = computeChecklist({ 'tile-shower': true, 'soft-gc': true }, {}, {}, ctx);
-    const gcPct = ITEM_BY_ID['soft-gc'].base;
-    near(withGc.hardBase, hardOnly.base);
-    near(withGc.base, hardOnly.base * (1 + gcPct / 100));
+  it('a price override reaches every room of that kind at once', () => {
+    const keys = [taskKey('bathroom-1', 'toilet'), taskKey('bathroom-2', 'toilet')];
+    near(sow(on(keys), {}, { 'bathroom.toilet.base': 500 }).base, 1000);
   });
 
-  it('two percent items both bill off hard costs, not off each other', () => {
-    const t = computeChecklist(
-      { 'tile-shower': true, 'soft-gc': true, 'soft-genconditions': true }, {}, {}, ctx);
-    const hard = t.hardBase;
-    const gc = ITEM_BY_ID['soft-gc'].base, gen = ITEM_BY_ID['soft-genconditions'].base;
-    near(t.base, hard * (1 + gc / 100 + gen / 100));
+  it('percent lines bill off hard costs and never off each other', () => {
+    const hard = taskKey('bathroom-1', 'shower-tile');
+    const only = sow(on([hard]));
+    const withPct = sow(on([hard, taskKey('soft', 'gc'), taskKey('soft', 'contingency')]));
+    const gc = DEF_BY_KIND.soft.tasks.find(t => t.id === 'gc')!.base;
+    const cont = DEF_BY_KIND.soft.tasks.find(t => t.id === 'contingency')!.base;
+    near(withPct.hardBase, only.base);
+    near(withPct.base, only.base * (1 + gc / 100 + cont / 100));
   });
 
-  it('section subtotals add up to the grand total', () => {
-    const checked = Object.fromEntries(CATALOG.flatMap(s => s.items.map(i => [i.id, true])));
-    const t = computeChecklist(checked, {}, {}, ctx);
-    near(t.base, t.sections.reduce((a, s) => a + s.base, 0), 1);
-    expect(t.checkedCount).toBe(CATALOG.flatMap(s => s.items).length);
+  it('space subtotals add up to the grand total', () => {
+    const all = Object.fromEntries(spaces.flatMap(sp =>
+      DEF_BY_KIND[sp.kind].tasks.map(t => [taskKey(sp.id, t.id), true])));
+    const t = sow(all);
+    near(t.base, t.spaces.reduce((a, x) => a + x.base, 0), 1);
+    expect(t.emptySpaces).toEqual([]);
   });
 
-  /* Seeded prices are only useful if a realistic scope lands where a Bay Area
-     scope actually lands. These two bracket the range this tool gets used on. */
-  const COSMETIC = ['demo-int', 'demo-dumpster', 'demo-haul', 'dry-patch',
-    'paint-int-walls', 'paint-int-trim', 'paint-ext-body',
-    'floor-lvp', 'floor-shoe', 'floor-level',
-    'cab-kitchen-stock', 'cab-counter-quartz', 'cab-sink-kitchen', 'cab-appliance', 'cab-hardware',
-    'cab-vanity', 'tile-bathfloor', 'tile-shower', 'tile-backsplash', 'tile-waterproof', 'tile-pan',
-    'elec-fixture', 'elec-devices', 'elec-recessed', 'plumb-trim-bath',
-    'land-front', 'soft-permit-build', 'soft-gc', 'soft-clean'];
+  /* The point of the whole tab: a plausible scope has to price like a real
+     Bay Area job, or the accuracy this structure buys is imaginary. */
+  const scopeAll = (level: 1 | 2 | 3) =>
+    spaces.reduce((c, sp) => applyLevel(sp, level, c), {} as Record<string, boolean>);
 
-  const GUT = [...COSMETIC, 'frame-dryrot', 'frame-subfloor', 'frame-trim-base',
-    'win-retrofit', 'win-interior', 'win-entry', 'roof-comp', 'roof-gutter',
-    'elec-panel', 'elec-rewire-full', 'elec-smoke', 'plumb-repipe', 'plumb-wh',
-    'hvac-furnace', 'hvac-duct-new', 'hvac-bathfan', 'hvac-range',
-    'dry-hang', 'dry-attic', 'soft-architect', 'soft-plancheck', 'soft-genconditions'];
-
-  const on = (ids: string[]) => Object.fromEntries(ids.map(i => [i, true]));
-
-  it('prices a cosmetic refresh in the Bay Area cosmetic range', () => {
-    const psf = computeChecklist(on(COSMETIC), {}, {}, ctx).base / ctx.sqft;
-    expect(psf).toBeGreaterThan(70);
-    expect(psf).toBeLessThan(160);
+  it('a whole-house refresh prices as a cosmetic job', () => {
+    const psf = sow(scopeAll(1)).base / prop.sqft;
+    expect(psf).toBeGreaterThan(55);
+    expect(psf).toBeLessThan(120);
   });
 
-  it('prices a full gut in the Bay Area gut range', () => {
-    const psf = computeChecklist(on(GUT), {}, {}, ctx).base / ctx.sqft;
-    expect(psf).toBeGreaterThan(190);
-    expect(psf).toBeLessThan(380);
+  /* Setting every one of the nineteen spaces to the same level is a maximal
+     job — reroof, rewire, repipe, ducts, windows, full exterior and full
+     landscape all at once — not a typical project. These bands say the maximum
+     is plausible, not that it is what anyone would scope. */
+  it('renovating every single space is a major job, not a mid-scope one', () => {
+    const psf = sow(scopeAll(2)).base / prop.sqft;
+    expect(psf).toBeGreaterThan(220);
+    expect(psf).toBeLessThan(360);
   });
 
-  it('a gut costs more than a cosmetic refresh at every price level', () => {
-    const c = computeChecklist(on(COSMETIC), {}, {}, ctx);
-    const g = computeChecklist(on(GUT), {}, {}, ctx);
-    expect(g.low).toBeGreaterThan(c.low);
-    expect(g.base).toBeGreaterThan(c.base);
-    expect(g.high).toBeGreaterThan(c.high);
+  it('gutting every single space sits at the top of the Bay Area range', () => {
+    const t = sow(scopeAll(3));
+    expect(t.hardBase / prop.sqft).toBeGreaterThan(280);
+    expect(t.hardBase / prop.sqft).toBeLessThan(460);
   });
 
-  it('low < base < high on any non-trivial scope', () => {
-    const t = computeChecklist(on(GUT), {}, {}, ctx);
+  /* The scope people actually write: gut the wet rooms where the money shows,
+     refresh the dry ones, and touch only the systems that need it. */
+  it('a realistic mixed scope lands in Bay Area flip territory', () => {
+    let c: Record<string, boolean> = {};
+    for (const id of ['kitchen-1', 'bathroom-1', 'bathroom-2']) c = applyLevel(find(id), 3, c);
+    for (const id of ['bedroom-1', 'bedroom-2', 'bedroom-3', 'living-1', 'dining-1', 'hall-1', 'halfbath-1'])
+      c = applyLevel(find(id), 1, c);
+    for (const id of ['roof', 'electrical', 'hvac', 'exterior', 'landscape', 'demo', 'soft'])
+      c = applyLevel(find(id), 2, c);
+    const psf = sow(c).base / prop.sqft;
+    expect(psf).toBeGreaterThan(120);
+    expect(psf).toBeLessThan(300);
+  });
+
+  /* Room-level figures are the strongest check available: these are numbers a
+     Bay Area contractor would recognise. */
+  it('prices a single bathroom the way a Bay Area bathroom prices', () => {
+    const bath = find('bathroom-1');
+    const at = (lv: 1 | 2 | 3) => sow(applyLevel(bath, lv, {})).base;
+    expect(at(1)).toBeGreaterThan(2500); expect(at(1)).toBeLessThan(9000);
+    expect(at(2)).toBeGreaterThan(11000); expect(at(2)).toBeLessThan(24000);
+    expect(at(3)).toBeGreaterThan(18000); expect(at(3)).toBeLessThan(40000);
+  });
+
+  it('prices a single kitchen the way a Bay Area kitchen prices', () => {
+    const kit = find('kitchen-1');
+    const at = (lv: 1 | 2 | 3) => sow(applyLevel(kit, lv, {})).base;
+    expect(at(1)).toBeGreaterThan(12000); expect(at(1)).toBeLessThan(30000);
+    expect(at(3)).toBeGreaterThan(38000); expect(at(3)).toBeLessThan(85000);
+  });
+
+  it('keeps mutually exclusive alternatives out of the same preset', () => {
+    /* stucco or siding, sod or drought planting — never both from one click */
+    const ext = applyLevel(find('exterior'), 2, {});
+    expect(ext[taskKey('exterior', 'siding')]).toBeUndefined();
+    const yard = applyLevel(find('landscape'), 2, {});
+    expect(yard[taskKey('landscape', 'drought')]).toBeUndefined();
+    expect(yard[taskKey('landscape', 'sod')]).toBe(true);
+  });
+
+  it('low is meaningfully cheaper than high on any real scope', () => {
+    const t = sow(scopeAll(2));
     expect(t.low).toBeLessThan(t.base);
     expect(t.base).toBeLessThan(t.high);
-  });
-
-  it('checking literally everything is absurd but not off by an order of magnitude', () => {
-    /* not a real scope — it buys two kitchens' worth of cabinets, four floor
-       types and three roofs — so this only guards against a stray zero */
-    const checked = Object.fromEntries(CATALOG.flatMap(s => s.items.map(i => [i.id, true])));
-    const psf = computeChecklist(checked, {}, {}, ctx).base / ctx.sqft;
-    expect(psf).toBeGreaterThan(400);
-    expect(psf).toBeLessThan(1500);
+    expect(t.high / t.low).toBeGreaterThan(1.5);
   });
 });
 

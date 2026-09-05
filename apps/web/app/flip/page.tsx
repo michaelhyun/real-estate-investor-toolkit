@@ -19,10 +19,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   defaultFlipState, computeFlip, solveMAO, seventyRule, buildSensitivity,
   verdictFor, SCENARIO_KEYS, ACQ_ITEMS, HOLD_ITEMS, SELL_FLAT_ITEMS,
-  CATALOG, computeChecklist, seededQty, citiesByCounty, findCity,
-  money, money0, pct,
-  type FlipState, type ScenarioKey, type CostLine, type QtyContext, type CatalogItem,
-  type FlipResult,
+  citiesByCounty, findCity,
+  buildSpaces, computeSow, applyLevel, taskKey, taskQty, DEF_BY_KIND, LEVEL_LABELS,
+  money, money0, pct, parseNum,
+  type FlipState, type ScenarioKey, type CostLine, type FlipResult,
+  type PropertyShape, type SpaceInstance, type SowTask, type Level,
 } from '@reit/core';
 import { NumInput, Switch, UnitToggle, loadJSON, saveJSON, openReportWindow } from '../../components/ui';
 import { buildFlipReport, buildScopeOfWork } from '../../components/flipReport';
@@ -38,7 +39,7 @@ const CATALOG_KEY = 'flipCatalog.v1';
 /* the account-side store for this tool — 'flip' is named once, here */
 const cloud = dealStore<FlipState>('flip');
 
-type TabId = 'assumptions' | 'model' | 'checklist';
+type TabId = 'assumptions' | 'model' | 'sow';
 
 /* ------------------------------------------------------------ normalization */
 
@@ -62,8 +63,15 @@ function normalizeFlip(d: any): FlipState {
     acq: { ...base.acq, ...(d.acq || {}) },
     hold: { ...base.hold, ...(d.hold || {}) },
     sell: { ...base.sell, ...(d.sell || {}) },
-    checked: d.checked || {},
-    qty: d.qty || {},
+    /* Scope keys changed shape when the checklist became room-based, so old
+       trade-catalog selections cannot be mapped and are dropped rather than
+       silently mis-assigned. Prices, which live outside the deal, survive. */
+    checked: Object.fromEntries(
+      Object.entries(d.checked || {}).filter(([k]) => k.includes('.'))) as Record<string, boolean>,
+    qty: Object.fromEntries(
+      Object.entries(d.qty || {}).filter(([k]) => k.includes('.'))) as Record<string, number>,
+    spaceSqft: d.spaceSqft || {},
+    spaceLevel: d.spaceLevel || {},
   };
 }
 
@@ -161,7 +169,7 @@ export default function FlipPage() {
   const [s, setS] = useState<FlipState>(defaultFlipState);
   const [catalogPrices, setCatalogPrices] = useState<Record<string, number>>({});
   const [tab, setTab] = useState<TabId>('assumptions');
-  const [openSecs, setOpenSecs] = useState<Record<string, boolean>>({ demo: true });
+  const [openSecs, setOpenSecs] = useState<Record<string, boolean>>({ 'kitchen-1': true });
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [savedDeals, setSavedDeals] = useState<FlipState[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -223,14 +231,20 @@ export default function FlipPage() {
   /* ---------- derived ---------- */
   const city = findCity(s.citySlug);
   const sqft = s.prop.sqft;
-  const ctx: QtyContext = useMemo(() => ({
+  const propShape: PropertyShape = useMemo(() => ({
     sqft: s.prop.sqft, beds: s.prop.beds, baths: s.prop.baths,
     halfBaths: s.prop.halfBaths, stories: s.prop.stories, garageBays: s.prop.garageBays,
   }), [s.prop]);
 
-  const checklist = useMemo(
-    () => computeChecklist(s.checked, s.qty, catalogPrices, ctx),
-    [s.checked, s.qty, catalogPrices, ctx]);
+  /* rooms come from the property; their areas seed from it and stay editable */
+  const spaces: SpaceInstance[] = useMemo(
+    () => buildSpaces(propShape).map(sp => ({ ...sp, sqft: s.spaceSqft[sp.id] ?? sp.sqft })),
+    [propShape, s.spaceSqft]);
+
+  const sow = useMemo(
+    () => computeSow(spaces, s.checked, s.qty, catalogPrices, propShape),
+    [spaces, s.checked, s.qty, catalogPrices, propShape]);
+  const allOpen = spaces.length > 0 && spaces.every(sp => openSecs[sp.id]);
 
   const rBase = useMemo(() => computeFlip(s, 'base'), [s]);
   /* rehab is one budget now, so the P&L compares the three ARV scenarios */
@@ -265,10 +279,10 @@ export default function FlipPage() {
   const amt = (lines: CostLine[], id: string) => lines.find(l => l.id === id)?.amount ?? 0;
   const allIn = s.price + rBase.acqTotal + rBase.rehabTotal + rBase.holdTotal + rBase.finTotal;
 
-  const diverged = s.rehabSource === 'checklist' && checklist.checkedCount > 0 &&
-    (Math.abs(checklist.base - s.rehab.base) > 1 ||
-     Math.abs(checklist.low - s.rehab.low) > 1 ||
-     Math.abs(checklist.high - s.rehab.high) > 1);
+  const diverged = s.rehabSource === 'checklist' && sow.checkedCount > 0 &&
+    (Math.abs(sow.base - s.rehab.base) > 1 ||
+     Math.abs(sow.low - s.rehab.low) > 1 ||
+     Math.abs(sow.high - s.rehab.high) > 1);
 
   /* ---------- actions ---------- */
   const setAddress = (v: string) =>
@@ -288,14 +302,29 @@ export default function FlipPage() {
     if (c) toast(`${c.name} preset applied — every value stays editable`);
   }
 
-  function pushChecklist() {
-    /* the checklist's own base is the estimate; the gap up to its high estimate
-       is a buffer you have actually itemised rather than a guessed percentage */
+  /* the three finish grades map straight onto the three rehab scenarios */
+  function pushSow() {
     setS(p => ({
       ...p, rehabSource: 'checklist',
-      rehab: { low: Math.round(checklist.low), base: Math.round(checklist.base), high: Math.round(checklist.high) },
+      rehab: { low: Math.round(sow.low), base: Math.round(sow.base), high: Math.round(sow.high) },
     }));
-    toast('Rehab budget updated from the checklist');
+    toast('Rehab scenarios updated from the scope of work');
+  }
+
+  function setLevel(sp: SpaceInstance, level: 0 | Level) {
+    setS(p => ({
+      ...p,
+      checked: applyLevel(sp, level, p.checked),
+      spaceLevel: { ...p.spaceLevel, [sp.id]: level },
+    }));
+  }
+
+  function setAllLevels(level: 0 | Level) {
+    setS(p => ({
+      ...p,
+      checked: spaces.reduce((c, sp) => applyLevel(sp, level, c), { ...p.checked }),
+      spaceLevel: Object.fromEntries(spaces.map(sp => [sp.id, level])),
+    }));
   }
 
   function saveDeal() {
@@ -321,13 +350,12 @@ export default function FlipPage() {
   const newDeal = () => { setS(defaultFlipState()); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const reset = () => { if (confirm('Reset every input to defaults?')) setS(defaultFlipState()); };
   const report = () => openReportWindow(buildFlipReport(s), '', () => toast('Allow pop-ups to open the report'));
-  const sow = () => openReportWindow(buildScopeOfWork(s, catalogPrices), '', () => toast('Allow pop-ups to open the scope'));
+  const printSow = () => openReportWindow(buildScopeOfWork(s, catalogPrices), '', () => toast('Allow pop-ups to open the scope'));
 
-  const setCatalogPrice = (id: string, k: 'low' | 'base' | 'high', v: number) =>
-    setCatalogPrices(p => ({ ...p, [`${id}.${k}`]: v }));
-  const priceOf = (i: CatalogItem, k: 'low' | 'base' | 'high') =>
-    catalogPrices[`${i.id}.${k}`] !== undefined ? catalogPrices[`${i.id}.${k}`] : i[k];
-  const qtyOf = (i: CatalogItem) => s.qty[i.id] !== undefined ? s.qty[i.id] : seededQty(i, ctx);
+  const setCatalogPrice = (key: string, v: number) =>
+    setCatalogPrices(p => ({ ...p, [key]: v }));
+  const taskPrice = (kind: string, task: SowTask, k: 'low' | 'base' | 'high') =>
+    catalogPrices[`${kind}.${task.id}.${k}`] ?? task[k];
 
   /* one P&L row across the three scenario columns */
   const PL = ({ label, pick, fmt = paren, cls, hint }: {
@@ -423,8 +451,8 @@ export default function FlipPage() {
         <button className={`tab${tab === 'assumptions' ? ' on' : ''}`} onClick={() => setTab('assumptions')}>Assumptions</button>
         <button className={`tab${tab === 'model' ? ' on' : ''}`} onClick={() => setTab('model')}>
           Deal Model <span className="badge">{compact(rBase.netProfit)}</span></button>
-        <button className={`tab${tab === 'checklist' ? ' on' : ''}`} onClick={() => setTab('checklist')}>
-          Cost Checklist <span className="badge">{checklist.checkedCount || '0'}</span></button>
+        <button className={`tab${tab === 'sow' ? ' on' : ''}`} onClick={() => setTab('sow')}>
+          Scope of Work <span className="badge">{sow.checkedCount || '0'}</span></button>
       </nav>
 
       {/* ============================================ TAB 1 — ASSUMPTIONS */}
@@ -508,7 +536,7 @@ export default function FlipPage() {
             note={<><b>Target 25–30% of ARV.</b> You are at {pct(rBase.grossSpread)} — {spreadVerdict}.</>} />
 
           <Band span={5} tag={s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}>Rehab budget</Band>
-          <G>Bay Area pricing: cosmetic <b>$90–160/sf</b>, full gut <b>$200–350/sf</b>. Yours is {money0(rBase.rehabPsf)}/sf at base — {rehabVerdict}. Build it on the Cost Checklist tab and push it here.</G>
+          <G>Bay Area pricing: cosmetic <b>$90–160/sf</b>, full gut <b>$200–350/sf</b>. Yours is {money0(rBase.rehabPsf)}/sf at base — {rehabVerdict}. Build it on the Scope of Work tab and push it here.</G>
           <R label="Rehab — low" unit={psf(s.rehab.low, sqft)} amount={money0(s.rehab.low)}
             note="Everything goes right: no dry rot, no surprises behind the walls.">
             <Money value={s.rehab.low} onChange={v => setRehab('low', v)} /></R>
@@ -698,18 +726,18 @@ export default function FlipPage() {
         {diverged && (
           <div className="notice warn" style={{ marginTop: 12 }}>
             <div><b>Checklist and budget have diverged</b>
-              Checklist says {money0(checklist.base)} at base; this deal uses {money0(s.rehab.base)}.</div>
+Scope of work says {money0(sow.base)} at standard grade; this deal uses {money0(s.rehab.base)}.</div>
             <div className="act">
-              <button onClick={pushChecklist}>Re-sync</button>
+              <button onClick={pushSow}>Re-sync</button>
               <button onClick={() => set('rehabSource', 'manual')}>Keep mine</button>
             </div>
           </div>
         )}
-        {checklist.checkedCount > 0 && s.rehabSource === 'manual' && (
+        {sow.checkedCount > 0 && s.rehabSource === 'manual' && (
           <div className="notice" style={{ marginTop: 12 }}>
-            <div><b>{checklist.checkedCount} items checked on the checklist</b>
-              They total {money0(checklist.base)} at base.</div>
-            <div className="act"><button onClick={pushChecklist}>Use these</button></div>
+            <div><b>{sow.checkedCount} tasks scoped on the Scope of Work</b>
+              {money0(sow.low)} rental · {money0(sow.base)} standard · {money0(sow.high)} high-end.</div>
+            <div className="act"><button onClick={pushSow}>Use these</button></div>
           </div>
         )}
       </section>
@@ -845,62 +873,112 @@ export default function FlipPage() {
         </table></div>
       </section>
 
-      {/* ============================================ TAB 4 — CHECKLIST */}
-      <section className={`pane${tab === 'checklist' ? ' on' : ''}`}>
-        <div className="flip-cols">
-          <div className="sheet" style={{ marginBottom: 0 }}><table className="ss"><tbody>
-            <Band tag="seeds every quantity below">Property</Band>
-            <R label="Square feet"><Money value={sqft} onChange={v => setProp('sqft', v)} /></R>
-            <R label="Bedrooms"><Num value={s.prop.beds} onChange={v => setProp('beds', v)} /></R>
-            <R label="Full baths"><Num value={s.prop.baths} onChange={v => setProp('baths', v)} /></R>
-            <R label="Half baths"><Num value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} /></R>
-            <R label="Stories"><Num value={s.prop.stories} onChange={v => setProp('stories', v)} /></R>
-            <R label="Garage bays"><Num value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} /></R>
-          </tbody></table></div>
-          <div className="notice" style={{ marginBottom: 0 }}>
-            <div><b>Prices are shared across every deal</b>
-              Edit one here and it is corrected everywhere, for good. What this deal owns is which items are
-              checked and any quantity you override — so a price you fix after a real bid comes in improves
-              every future underwrite instead of just this one.</div>
-          </div>
+      {/* ============================================ TAB 4 — SCOPE OF WORK */}
+      <section className={`pane${tab === 'sow' ? ' on' : ''}`}>
+        <div className="sumry" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+          <div className="hero"><div className="k">Base estimate</div>
+            <div className="v">{money0(sow.base)}</div>
+            <div className="s">{psf(sow.base, sqft)}</div></div>
+          <div><div className="k">Rental grade</div><div className="v">{money0(sow.low)}</div>
+            <div className="s">{psf(sow.low, sqft)}</div></div>
+          <div><div className="k">High-end</div><div className="v">{money0(sow.high)}</div>
+            <div className="s">{psf(sow.high, sqft)}</div></div>
+          <div><div className="k">Tasks scoped</div><div className="v">{sow.checkedCount}</div>
+            <div className="s">across {spaces.length} spaces</div></div>
+          <div><div className="k">Not yet scoped</div>
+            <div className={`v ${sow.emptySpaces.length ? 'warn' : 'pos'}`}>{sow.emptySpaces.length}</div>
+            <div className="s">{sow.emptySpaces.length ? 'spaces untouched' : 'every space decided'}</div></div>
         </div>
 
-        <div style={{ height: 14 }} />
+        <div className="sow-bar">
+          <button className="btn" onClick={() => setAllLevels(1)}>Refresh everything</button>
+          <button className="btn" onClick={() => setAllLevels(2)}>Renovate everything</button>
+          <button className="btn" onClick={() => setAllLevels(3)}>Gut everything</button>
+          <button className="btn ghost" onClick={() => setAllLevels(0)}>Clear all</button>
+          <button className="btn" onClick={() => setOpenSecs(
+            Object.fromEntries(spaces.map(sp => [sp.id, !allOpen])))}>
+            {allOpen ? 'Collapse all' : 'Expand all'}</button>
+        </div>
 
-        {CATALOG.map(sec => {
-          const t = checklist.sections.find(x => x.id === sec.id)!;
-          const open = !!openSecs[sec.id];
+        {sow.emptySpaces.length > 0 && (
+          <div className="notice warn">
+            <div><b>{sow.emptySpaces.length} spaces have nothing scoped</b>
+              {sow.emptySpaces.slice(0, 8).join(' · ')}{sow.emptySpaces.length > 8 ? ' …' : ''}.
+              Set each to Skip once you have decided it genuinely needs nothing — forgetting a space is
+              the single biggest source of a blown rehab budget.</div>
+          </div>
+        )}
+        {sow.missedUnchecked.length > 0 && (
+          <div className="notice">
+            <div><b>Commonly missed and not yet scoped</b>
+              {sow.missedUnchecked.slice(0, 6).map(m => `${m.desc} (${m.space})`).join(' · ')}
+              {sow.missedUnchecked.length > 6 ? ` · and ${sow.missedUnchecked.length - 6} more` : ''}.
+              These are the lines that turn up after demolition rather than before an offer.</div>
+          </div>
+        )}
+
+        <div className="sheet"><table className="ss"><tbody>
+          <Band tag="drives every room below">Property</Band>
+          <R label="Square feet"><Money value={sqft} onChange={v => setProp('sqft', v)} /></R>
+          <R label="Bedrooms"><Num value={s.prop.beds} onChange={v => setProp('beds', v)} /></R>
+          <R label="Full baths"><Num value={s.prop.baths} onChange={v => setProp('baths', v)} /></R>
+          <R label="Half baths"><Num value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} /></R>
+          <R label="Stories"><Num value={s.prop.stories} onChange={v => setProp('stories', v)} /></R>
+          <R label="Garage bays"><Num value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} /></R>
+        </tbody></table></div>
+
+        {spaces.map(sp => {
+          const def = DEF_BY_KIND[sp.kind];
+          const tot = sow.spaces.find(x => x.id === sp.id)!;
+          const open = !!openSecs[sp.id];
+          const lvl = s.spaceLevel[sp.id];
           return (
-            <div className={`cl-sec${open ? ' open' : ''}`} key={sec.id}>
-              <div className="cl-sec-head" onClick={() => setOpenSecs(p => ({ ...p, [sec.id]: !p[sec.id] }))}>
+            <div className={`sp${open ? ' open' : ''}${tot.count === 0 ? ' empty' : ''}`} key={sp.id}>
+              <div className="sp-head" onClick={() => setOpenSecs(p => ({ ...p, [sp.id]: !p[sp.id] }))}>
                 <span className="chev">▶</span>
-                <span className="nm">{sec.label}</span>
-                <span className={`ct${t.count ? '' : ' zero'}`}>{t.count} / {sec.items.length}</span>
-                <span className="amt">{t.base > 0 ? money0(t.base) : '—'}</span>
+                <span className="nm">{sp.label}</span>
+                {sp.room && (
+                  <span className="sz" onClick={ev => ev.stopPropagation()}>
+                    <input value={sp.sqft} inputMode="numeric"
+                      onChange={ev => setS(p => ({ ...p, spaceSqft: { ...p.spaceSqft, [sp.id]: parseNum(ev.target.value) } }))} /> sf
+                  </span>
+                )}
+                <span className="lv" onClick={ev => ev.stopPropagation()}>
+                  {LEVEL_LABELS.map(l => (
+                    <button key={l.v} title={l.hint}
+                      className={`${lvl === l.v ? 'on' : ''}${l.v === 0 ? ' skip' : ''}`}
+                      onClick={() => setLevel(sp, l.v)}>{l.label}</button>
+                  ))}
+                </span>
+                <span className={`ct${tot.count ? '' : ' zero'}`}>{tot.count} / {tot.total}</span>
+                <span className="amt">{tot.base > 0 ? money0(tot.base) : '—'}</span>
               </div>
-              <div className="cl-body">
-                <div className="cl-head">
-                  <span /><span className="l">Item</span>
-                  <span>Qty</span><span>Low</span><span>Base</span><span>High</span>
+              <div className="sp-body">
+                <div className="sp-head-row">
+                  <span /><span className="l">Task</span>
+                  <span>Qty</span><span>Rental</span><span>Standard</span><span>High-end</span>
                 </div>
-                {sec.items.map(i => {
-                  const on = !!s.checked[i.id];
+                {def.tasks.map(task => {
+                  const key = taskKey(sp.id, task.id);
+                  const on = !!s.checked[key];
+                  const q = s.qty[key] !== undefined ? s.qty[key] : taskQty(task, sp, propShape);
                   return (
-                    <div className={`cl-row${on ? ' on' : ''}`} key={i.id}>
+                    <div className={`sp-row${on ? ' on' : ''}`} key={task.id}>
                       <input type="checkbox" checked={on}
-                        onChange={ev => setS(p => ({ ...p, checked: { ...p.checked, [i.id]: ev.target.checked } }))} />
+                        onChange={ev => setS(p => ({ ...p, checked: { ...p.checked, [key]: ev.target.checked } }))} />
                       <div className="d">
-                        {i.desc}<span className="un">{i.pctOfHard ? '% of hard' : i.unit}</span>
-                        {i.note && <span className="nt">{i.note}</span>}
+                        {task.desc}<span className="un">{task.pctOfHard ? '% of hard' : task.unit}</span>
+                        {task.missed && <span className="miss">often missed</span>}
+                        {task.note && <span className="nt">{task.note}</span>}
                       </div>
-                      {i.pctOfHard
+                      {task.pctOfHard
                         ? <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-faint)' }}>—</div>
-                        : <NumInput fmt="raw" value={qtyOf(i)}
-                            onChange={v => setS(p => ({ ...p, qty: { ...p.qty, [i.id]: v } }))} />}
+                        : <NumInput fmt="raw" value={q}
+                            onChange={v => setS(p => ({ ...p, qty: { ...p.qty, [key]: v } }))} />}
                       {(['low', 'base', 'high'] as const).map(k => (
-                        <NumInput key={k} fmt="raw" value={priceOf(i, k)}
-                          className={catalogPrices[`${i.id}.${k}`] !== undefined ? 'edited' : ''}
-                          onChange={v => setCatalogPrice(i.id, k, v)} />
+                        <NumInput key={k} fmt="raw" value={taskPrice(sp.kind, task, k)}
+                          className={catalogPrices[`${sp.kind}.${task.id}.${k}`] !== undefined ? 'edited' : ''}
+                          onChange={v => setCatalogPrice(`${sp.kind}.${task.id}.${k}`, v)} />
                       ))}
                     </div>
                   );
@@ -910,20 +988,27 @@ export default function FlipPage() {
           );
         })}
 
-        <div className="cl-sticky">
-          <div className="grp"><span className="lbl">Low</span>
-            <span className="val">{money0(checklist.low)}<span className="psf">{psf(checklist.low, sqft)}</span></span></div>
-          <div className="grp"><span className="lbl">Base</span>
-            <span className="val">{money0(checklist.base)}<span className="psf">{psf(checklist.base, sqft)}</span></span></div>
-          <div className="grp"><span className="lbl">High</span>
-            <span className="val">{money0(checklist.high)}<span className="psf">{psf(checklist.high, sqft)}</span></span></div>
-          <div className="grp"><span className="lbl">Checked</span><span className="val">{checklist.checkedCount}</span></div>
+        <div className="sow-foot">
+          <div className="grp"><span className="lbl">Rental</span>
+            <span className="val">{money0(sow.low)}<span className="psf">{psf(sow.low, sqft)}</span></span></div>
+          <div className="grp"><span className="lbl">Standard</span>
+            <span className="val">{money0(sow.base)}<span className="psf">{psf(sow.base, sqft)}</span></span></div>
+          <div className="grp"><span className="lbl">High-end</span>
+            <span className="val">{money0(sow.high)}<span className="psf">{psf(sow.high, sqft)}</span></span></div>
+          <div className="grp"><span className="lbl">Tasks</span><span className="val">{sow.checkedCount}</span></div>
           <div className="push">
-            <button className="btn" onClick={sow} disabled={!checklist.checkedCount}>⬇ Scope of Work</button>
-            <button className="btn primary" onClick={pushChecklist} disabled={!checklist.checkedCount}>
+            <button className="btn" onClick={printSow} disabled={!sow.checkedCount}>⬇ Print scope</button>
+            <button className="btn primary" onClick={pushSow} disabled={!sow.checkedCount}>
               Use as rehab budget</button>
           </div>
         </div>
+
+        <p className="footnote">
+          The three price columns are finish grades, and they feed the three rehab scenarios directly:
+          rental grade becomes your low case, standard your base, high-end your high. Prices are shared
+          across every deal — correct one after a real bid and every future underwrite is right. What this
+          deal owns is which tasks are scoped, each room&apos;s area, and any quantity you override.
+        </p>
       </section>
 
       <p className="footnote">
