@@ -29,6 +29,7 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 html { -webkit-text-size-adjust:100%; }
 body {
+  overflow-x: hidden;
   font-family: var(--sans);
   background: var(--paper);
   color: var(--ink);
@@ -262,10 +263,10 @@ a.p-chip.link { background:var(--accent-soft); border-color:#bcd8d0; color:var(-
 .toast.show { transform:translateX(-50%) translateY(0); }
 
 /* ---------- landing ---------- */
-.hero { margin: 26px 0 30px; max-width: 640px; }
-.hero h1 { font-family:var(--display); font-weight:500; font-size:34px; letter-spacing:-.01em; line-height:1.15; }
-.hero h1 em { font-style:normal; color:var(--accent); }
-.hero p { color:var(--ink-soft); font-size:15px; margin-top:10px; line-height:1.55; }
+.wrap > .hero { margin: 26px 0 30px; max-width: 640px; }
+.wrap > .hero h1 { font-family:var(--display); font-weight:500; font-size:34px; letter-spacing:-.01em; line-height:1.15; }
+.wrap > .hero h1 em { font-style:normal; color:var(--accent); }
+.wrap > .hero p { color:var(--ink-soft); font-size:15px; margin-top:10px; line-height:1.55; }
 .tool-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px; }
 .tool-card {
   display:block; text-decoration:none; color:var(--ink);
@@ -751,11 +752,17 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
 
 /* ---------- assumptions summary strip ---------- */
 .sumry {
-  display:grid; grid-template-columns:repeat(5, 1fr); gap:1px;
-  background:var(--line); border:1px solid var(--line-strong); border-radius:7px;
+  /* Dividers are borders on the tiles, not a background showing through a
+     1px gap. With gap-showthrough, any column count that does not divide the
+     tile count leaves a stranded grey cell at the end. */
+  display:grid; grid-template-columns:repeat(5, 1fr); gap:0;
+  background:var(--card); border:1px solid var(--line-strong); border-radius:7px;
   overflow:hidden; margin-bottom:12px; box-shadow:var(--shadow);
 }
-.sumry > div { background:var(--card); padding:6px 10px 7px; }
+.sumry > div {
+  background:var(--card); padding:6px 10px 7px;
+  border-right:1px solid var(--line); border-bottom:1px solid var(--line);
+}
 .sumry .k {
   font-family:var(--mono); font-size:9px; letter-spacing:.07em; text-transform:uppercase;
   color:var(--ink-faint); white-space:nowrap;
@@ -769,8 +776,12 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
 .sumry .v.warn { color:var(--warn); }
 .sumry .s { font-size:9.5px; color:var(--ink-faint); }
 .sumry > div.hero { background:var(--accent-soft); }
-@media (max-width: 1080px) { .sumry { grid-template-columns:repeat(3, 1fr); } }
-@media (max-width: 640px)  { .sumry { grid-template-columns:repeat(2, 1fr); } }
+/* the page-hero rule is scoped to `.wrap > .hero`, but reset here too so a
+   future bare `.hero` rule cannot inset these tiles from their own row */
+.sumry > div { margin:0; max-width:none; }
+.sumry.four { grid-template-columns:repeat(4, 1fr); }
+@media (max-width: 1080px) { .sumry, .sumry.four { grid-template-columns:repeat(3, 1fr); } }
+@media (max-width: 640px)  { .sumry, .sumry.four { grid-template-columns:repeat(2, 1fr); } }
 
 /* ---------- the guidance column ---------- */
 .ss td.note { display:none; }
@@ -792,12 +803,16 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .ss tr.guide td b { color:var(--ink); font-weight:700; }
-@media (max-width: 1080px) { .ss td.note { display:none; } }
+@media (max-width: 1080px) { .ss.with-notes td.note { display:none; } }
 .ss { width:100%; border-collapse:collapse; font-size:12px; line-height:1.25; }
 .ss td, .ss th { padding:1px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
 /* fixed widths keep the inputs tight to the left and give every remaining
    pixel to the guidance column */
 .ss.with-notes { table-layout:fixed; }
+.ss.with-notes .c-lb  { width:228px; }
+.ss.with-notes .c-n   { width:96px; }
+.ss.with-notes .c-u   { width:52px; }
+.ss.with-notes .c-amt { width:104px; }
 .ss tr:last-child td { border-bottom:none; }
 
 /* title band — one per sheet */
@@ -824,6 +839,7 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
 
 .ss td.lb { color:var(--ink); }
 .ss td.lb .sub { display:block; font-size:10.5px; color:var(--ink-faint); line-height:1.35; margin-top:1px; }
+.ss .u-inline { display:none; font-family:var(--mono); font-size:9.5px; color:var(--ink-faint); margin-left:5px; }
 /* Two number columns, tinted differently so it is obvious at a glance which
    figures you control and which the model derives. */
 .ss td.n {
@@ -969,7 +985,7 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
 
 .sp-body { display:none; }
 .sp.open .sp-body { display:block; }
-.sp-head-row, .sp-row { display:grid; grid-template-columns:24px 1fr 66px 78px 78px 78px; gap:6px; align-items:center; padding:3px 11px; }
+.sp-head-row, .sp-row { display:grid; grid-template-columns:24px 1fr 62px 82px 92px; gap:6px; align-items:center; padding:3px 11px; }
 .sp-head-row {
   font-family:var(--mono); font-size:9px; letter-spacing:.06em; text-transform:uppercase;
   color:var(--ink-faint); border-bottom:1px solid var(--line-strong); padding:5px 11px;
@@ -989,6 +1005,12 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
 .sp-row .d .un { font-family:var(--mono); font-size:9.5px; color:var(--ink-faint); text-transform:uppercase; margin-left:5px; }
 .sp-row .num { width:100%; font-size:11.5px; padding:2px 6px; height:22px; }
 .sp-row .num.edited { border-color:var(--accent); background:var(--accent-soft); }
+.sp-row .dash, .sp-row .line {
+  text-align:right; font-family:var(--mono); font-size:11.5px; font-variant-numeric:tabular-nums;
+}
+.sp-row .dash { color:var(--ink-faint); }
+.sp-row .line { font-weight:600; }
+.sp-row .line.off { color:var(--ink-faint); font-weight:400; }
 .sp-row input[type=checkbox] { width:15px; height:15px; accent-color:var(--accent); cursor:pointer; }
 
 .sow-foot {
@@ -1025,3 +1047,104 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
   border-radius:6px; background:var(--card); color:var(--ink); width:100%;
 }
 .ss .sel-city { max-width:100%; }
+
+
+/* ============================================================
+   Mobile
+
+   The tool is a spreadsheet, and a spreadsheet on a phone has to give
+   something up. The order it gives things up in is: guidance first (it is
+   context, not data), then derived amounts (recoverable by reading the row),
+   then the unit column — never the label or the input, which are the two
+   things you cannot work without.
+   ============================================================ */
+
+@media (max-width: 1080px) {
+  .wrap { padding-left:14px; padding-right:14px; }
+}
+
+@media (max-width: 900px) {
+  /* let labels wrap instead of truncating once the table is content-sized, and
+     hand the column widths back to the content */
+  .ss.with-notes { table-layout:auto; }
+  .ss.with-notes col { width:auto; }
+  /* nothing may push the page sideways: a sheet scrolls inside itself */
+  .sheet { overflow-x:auto; }
+  /* Under auto layout a nowrap cell sets the table's width, so the full-width
+     guidance and section rows have to be allowed to wrap — otherwise one long
+     sentence drags the inputs off the right edge. */
+  .ss tr.guide td, .ss tr.sec td, .ss tr.band td { white-space:normal; }
+  .ss tr.guide td { overflow:visible; text-overflow:clip; }
+  .ss td.lb, .ss.with-notes td.lb {
+    width:auto; min-width:0; white-space:normal; text-overflow:clip;
+  }
+  .ss td.n { width:88px; }
+  .ss.with-notes td.amt { width:92px; }
+  .ss td, .ss th { padding:2px 6px; }
+
+  /* wide tables scroll inside their own sheet rather than the page */
+  .sheet.scrollx { overflow-x:auto; }
+  .pl { min-width:560px; }
+
+  .sp-head-row, .sp-row { grid-template-columns:22px 1fr 54px 74px 78px; gap:5px; padding:3px 8px; }
+  .sp-head { padding:6px 8px; }
+  .sow-foot, .cl-sticky { padding:8px 10px; }
+}
+
+@media (max-width: 700px) {
+  /* the derived column goes: every figure in it is recoverable from the row */
+  .ss.with-notes td.amt { display:none; }
+  .ss { font-size:11.5px; }
+  .ss td.n { width:80px; }
+  .ss .num { font-size:11px; height:22px; }        /* taller target for a thumb */
+  .ss td.u { width:38px; font-size:9.5px; }
+  .ss tr.grand td { font-size:12.5px; }
+  .ss tr.tot td { font-size:12px; }
+
+  .sp-head-row, .sp-row { grid-template-columns:20px 1fr 48px 68px; gap:4px; }
+  /* the line cost goes too — the space subtotal in the header carries it */
+  .sp-head-row span:last-child, .sp-row .line, .sp-row .dash { display:none; }
+  .sp-row .num { height:24px; }
+  .sp-row .d { font-size:11.5px; }
+  .sp-row .d .nt { display:none; }
+
+  /* the level preset is the primary control on a phone — give it its own row */
+  .sp-head { flex-wrap:wrap; row-gap:5px; }
+  .sp-head .lv { order:5; flex-basis:100%; }
+  .sp-head .lv button { flex:1; padding:4px 0; font-size:11px; }
+  .sp-head .amt { order:4; }
+
+  .tabs { gap:0; }
+  .tab { padding:10px 11px; font-size:13px; }
+  .tab .badge { display:none; }
+
+  /* The deal header stacks: address, then a full-width button row. Resetting
+     the flex basis matters — in a column direction `flex: 1 1 340px` is read as
+     a 340px HEIGHT, which opened a large gap under the header. */
+  .deal-topline { flex-direction:column; align-items:stretch; }
+  .deal-title-wrap { flex:0 0 auto; width:100%; min-width:0; max-width:none; }
+  .deal-actions { width:100%; display:flex; gap:6px; }
+  .deal-actions .btn { flex:1 1 0; min-width:0; padding:9px 6px; font-size:12.5px; }
+  .prop-chips { flex-wrap:wrap; }
+  .prop-chips { gap:5px; }
+  .p-chip { font-size:11px; padding:4px 9px; }
+
+  .notice { font-size:11.5px; padding:7px 10px; }
+  .notice .act { margin-left:0; flex-basis:100%; }
+  .footnote { font-size:11px; }
+
+  .sumry .v { font-size:14px; }
+  .sumry > div { padding:5px 8px 6px; }
+}
+
+@media (max-width: 480px) {
+  .wrap { padding-left:10px; padding-right:10px; }
+  .ss td, .ss th { padding:2px 5px; }
+  .ss td.u { display:none; }          /* the unit moves into the label instead */
+  .ss .u-inline { display:inline; }
+  .ss td.n { width:76px; }
+  .sp-head .nm { font-size:11px; }
+  .sp-head .sz, .sp-head .ct { display:none; }
+  .sow-foot .push, .cl-sticky .push { margin-left:0; flex-basis:100%; }
+  .sow-foot .push .btn, .cl-sticky .push .btn { flex:1; }
+}

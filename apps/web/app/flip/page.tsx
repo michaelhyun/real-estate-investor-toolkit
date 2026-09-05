@@ -20,7 +20,7 @@ import {
   defaultFlipState, computeFlip, solveMAO, seventyRule, buildSensitivity,
   verdictFor, SCENARIO_KEYS, ACQ_ITEMS, HOLD_ITEMS, SELL_FLAT_ITEMS,
   citiesByCounty, findCity,
-  buildSpaces, computeSow, applyLevel, taskKey, taskQty, DEF_BY_KIND, LEVEL_LABELS,
+  buildSpaces, computeSow, applyLevel, taskKey, taskQty, taskCost, priceKey, DEF_BY_KIND, LEVEL_LABELS,
   money, money0, pct, parseNum,
   type FlipState, type ScenarioKey, type CostLine, type FlipResult,
   type PropertyShape, type SpaceInstance, type SowTask, type Level,
@@ -130,7 +130,13 @@ function R({ label, hint, unit, children, ctl, note, amount }: {
 }) {
   return (
     <tr>
-      <td className="lb">{label}{hint && <span className="sub">{hint}</span>}</td>
+      <td className="lb">
+        {label}
+        {/* the unit column is dropped on the narrowest screens, so the unit
+            rides along in the label and is revealed there instead */}
+        {unit && <span className="u-inline">{unit}</span>}
+        {hint && <span className="sub">{hint}</span>}
+      </td>
       {ctl ? <td className="ctl" colSpan={2}>{ctl}</td> : <>
         <td className="n">{children}</td>
         <td className="u">{unit}</td>
@@ -149,7 +155,11 @@ function V({ label, hint, value, unit, cls, note }: {
 }) {
   return (
     <tr className={cls}>
-      <td className="lb">{label}{hint && <span className="sub">{hint}</span>}</td>
+      <td className="lb">
+        {label}
+        {unit && <span className="u-inline">{unit}</span>}
+        {hint && <span className="sub">{hint}</span>}
+      </td>
       <td className="n" />
       <td className="u">{unit}</td>
       <td className="amt">{value}</td>
@@ -280,9 +290,7 @@ export default function FlipPage() {
   const allIn = s.price + rBase.acqTotal + rBase.rehabTotal + rBase.holdTotal + rBase.finTotal;
 
   const diverged = s.rehabSource === 'checklist' && sow.checkedCount > 0 &&
-    (Math.abs(sow.base - s.rehab.base) > 1 ||
-     Math.abs(sow.low - s.rehab.low) > 1 ||
-     Math.abs(sow.high - s.rehab.high) > 1);
+    Math.abs(sow.total - s.rehab.base) > 1;
 
   /* ---------- actions ---------- */
   const setAddress = (v: string) =>
@@ -302,13 +310,11 @@ export default function FlipPage() {
     if (c) toast(`${c.name} preset applied — every value stays editable`);
   }
 
-  /* the three finish grades map straight onto the three rehab scenarios */
+  /* One price per task means one total, so it lands on the base scenario. Low
+     and high stay yours to set — they are judgement about risk, not arithmetic. */
   function pushSow() {
-    setS(p => ({
-      ...p, rehabSource: 'checklist',
-      rehab: { low: Math.round(sow.low), base: Math.round(sow.base), high: Math.round(sow.high) },
-    }));
-    toast('Rehab scenarios updated from the scope of work');
+    setS(p => ({ ...p, rehabSource: 'checklist', rehab: { ...p.rehab, base: Math.round(sow.total) } }));
+    toast('Base rehab updated from the scope of work');
   }
 
   function setLevel(sp: SpaceInstance, level: 0 | Level) {
@@ -319,13 +325,6 @@ export default function FlipPage() {
     }));
   }
 
-  function setAllLevels(level: 0 | Level) {
-    setS(p => ({
-      ...p,
-      checked: spaces.reduce((c, sp) => applyLevel(sp, level, c), { ...p.checked }),
-      spaceLevel: Object.fromEntries(spaces.map(sp => [sp.id, level])),
-    }));
-  }
 
   function saveDeal() {
     if (!s.prop.address.trim()) { toast('Enter the property address first — it names the deal'); return; }
@@ -354,8 +353,6 @@ export default function FlipPage() {
 
   const setCatalogPrice = (key: string, v: number) =>
     setCatalogPrices(p => ({ ...p, [key]: v }));
-  const taskPrice = (kind: string, task: SowTask, k: 'low' | 'base' | 'high') =>
-    catalogPrices[`${kind}.${task.id}.${k}`] ?? task[k];
 
   /* one P&L row across the three scenario columns */
   const PL = ({ label, pick, fmt = paren, cls, hint }: {
@@ -452,7 +449,7 @@ export default function FlipPage() {
         <button className={`tab${tab === 'model' ? ' on' : ''}`} onClick={() => setTab('model')}>
           Deal Model <span className="badge">{compact(rBase.netProfit)}</span></button>
         <button className={`tab${tab === 'sow' ? ' on' : ''}`} onClick={() => setTab('sow')}>
-          Scope of Work <span className="badge">{sow.checkedCount || '0'}</span></button>
+          Scope of Work <span className="badge">{sow.checkedCount ? money0(sow.total) : '0'}</span></button>
       </nav>
 
       {/* ============================================ TAB 1 — ASSUMPTIONS */}
@@ -485,9 +482,11 @@ export default function FlipPage() {
         {city?.note && <div className="notice warn"><div><b>{city.name}</b>{city.note}</div></div>}
 
         <div className="sheet one"><table className="ss with-notes">
+          {/* widths live in CSS, not inline, so the media queries can take them
+              back on a narrow screen */}
           <colgroup>
-            <col style={{ width: 228 }} /><col style={{ width: 96 }} />
-            <col style={{ width: 52 }} /><col style={{ width: 104 }} /><col />
+            <col className="c-lb" /><col className="c-n" /><col className="c-u" />
+            <col className="c-amt" /><col className="c-note" />
           </colgroup>
           <tbody>
 
@@ -726,7 +725,7 @@ export default function FlipPage() {
         {diverged && (
           <div className="notice warn" style={{ marginTop: 12 }}>
             <div><b>Checklist and budget have diverged</b>
-Scope of work says {money0(sow.base)} at standard grade; this deal uses {money0(s.rehab.base)}.</div>
+Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.base)}.</div>
             <div className="act">
               <button onClick={pushSow}>Re-sync</button>
               <button onClick={() => set('rehabSource', 'manual')}>Keep mine</button>
@@ -736,7 +735,7 @@ Scope of work says {money0(sow.base)} at standard grade; this deal uses {money0(
         {sow.checkedCount > 0 && s.rehabSource === 'manual' && (
           <div className="notice" style={{ marginTop: 12 }}>
             <div><b>{sow.checkedCount} tasks scoped on the Scope of Work</b>
-              {money0(sow.low)} rental · {money0(sow.base)} standard · {money0(sow.high)} high-end.</div>
+              They total {money0(sow.total)}.</div>
             <div className="act"><button onClick={pushSow}>Use these</button></div>
           </div>
         )}
@@ -749,21 +748,19 @@ Scope of work says {money0(sow.base)} at standard grade; this deal uses {money0(
           <div><div className="v-title">{verdict.title}</div><div className="v-sub">{verdict.sub}</div></div>
         </div>
 
-        <div className="sheet"><table className="ss"><tbody>
-          <Band span={6} tag="base case">Headline</Band>
-          <tr>
-            <td className="lb">Net profit after {s.taxPct}% tax</td>
-            <td className={`n ${rBase.netProfit < 0 ? 'neg' : 'pos'}`} style={{ fontSize: 15, fontWeight: 700 }}>
-              {money(rBase.netProfit)}</td>
-            <td className="lb">ROI on cash</td><td className="n">{pct(rBase.roi)}</td>
-            <td className="lb">Annualized</td><td className="n">{pct(rBase.annualizedRoi)}</td>
-          </tr>
-          <tr>
-            <td className="lb">Margin — % of ARV, pre-tax</td><td className="n">{pct(rBase.marginPreTax)}</td>
-            <td className="lb">Max allowable offer</td><td className="n">{money0(mao)}</td>
-            <td className="lb">70% rule</td><td className="n">{money(seventyRule(s))}</td>
-          </tr>
-        </tbody></table></div>
+        <div className="sumry">
+          <div className="hero"><div className="k">Net profit</div>
+            <div className={`v ${rBase.netProfit < 0 ? 'neg' : rBase.netProfit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.netProfit)}</div>
+            <div className="s">after {s.taxPct}% tax</div></div>
+          <div><div className="k">ROI on cash</div><div className="v">{pct(rBase.roi)}</div>
+            <div className="s">{money0(rBase.peakCash)} invested</div></div>
+          <div><div className="k">Annualized</div><div className="v">{pct(rBase.annualizedRoi)}</div>
+            <div className="s">{Math.round(rBase.holdMonths * 30.4375)}-day hold</div></div>
+          <div><div className="k">Margin % of ARV</div><div className="v">{pct(rBase.marginPreTax)}</div>
+            <div className="s">pre-tax</div></div>
+          <div><div className="k">Max offer</div><div className="v">{money0(mao)}</div>
+            <div className="s">70% rule: {money0(seventyRule(s))}</div></div>
+        </div>
 
         <div className="notice"><div>{seventyRule(s) < mao
           ? `The 70% rule is stricter than your own numbers by ${money0(mao - seventyRule(s))}. It assumes financing and selling costs that Bay Area price points don't match, so trust your MAO.`
@@ -822,7 +819,7 @@ Scope of work says {money0(sow.base)} at standard grade; this deal uses {money0(
           </div>
         </div>
 
-        <div className="sheet"><table className="ss pl">
+        <div className="sheet scrollx"><table className="ss pl">
           <thead>
             <Band span={4} tag={`rehab budget ${money0(rBase.rehabTotal)}`}>Deal model</Band>
             <tr>
@@ -834,7 +831,7 @@ Scope of work says {money0(sow.base)} at standard grade; this deal uses {money0(
           </thead>
           <tbody>
             <Sec span={4}>Scope &amp; timeline</Sec>
-            <PL label="Rehab budget — estimate plus buffer" pick={r => r.rehabTotal} fmt={money0} />
+            <PL label="Rehab budget" pick={r => r.rehabTotal} fmt={money0} />
             <PL label="Total hold period — months" pick={r => r.holdMonths} fmt={n => n.toFixed(1)} />
 
             <Sec span={4}>Sale proceeds</Sec>
@@ -875,29 +872,28 @@ Scope of work says {money0(sow.base)} at standard grade; this deal uses {money0(
 
       {/* ============================================ TAB 4 — SCOPE OF WORK */}
       <section className={`pane${tab === 'sow' ? ' on' : ''}`}>
-        <div className="sumry" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-          <div className="hero"><div className="k">Base estimate</div>
-            <div className="v">{money0(sow.base)}</div>
-            <div className="s">{psf(sow.base, sqft)}</div></div>
-          <div><div className="k">Rental grade</div><div className="v">{money0(sow.low)}</div>
-            <div className="s">{psf(sow.low, sqft)}</div></div>
-          <div><div className="k">High-end</div><div className="v">{money0(sow.high)}</div>
-            <div className="s">{psf(sow.high, sqft)}</div></div>
+        <div className="sumry four">
+          <div className="hero"><div className="k">Rehab estimate</div>
+            <div className="v">{money0(sow.total)}</div>
+            <div className="s">{psf(sow.total, sqft)}</div></div>
           <div><div className="k">Tasks scoped</div><div className="v">{sow.checkedCount}</div>
             <div className="s">across {spaces.length} spaces</div></div>
           <div><div className="k">Not yet scoped</div>
             <div className={`v ${sow.emptySpaces.length ? 'warn' : 'pos'}`}>{sow.emptySpaces.length}</div>
             <div className="s">{sow.emptySpaces.length ? 'spaces untouched' : 'every space decided'}</div></div>
+          <div><div className="k">Often missed</div>
+            <div className={`v ${sow.missedUnchecked.length ? 'warn' : 'pos'}`}>{sow.missedUnchecked.length}</div>
+            <div className="s">{sow.missedUnchecked.length ? 'still unscoped' : 'all accounted for'}</div></div>
         </div>
 
         <div className="sow-bar">
-          <button className="btn" onClick={() => setAllLevels(1)}>Refresh everything</button>
-          <button className="btn" onClick={() => setAllLevels(2)}>Renovate everything</button>
-          <button className="btn" onClick={() => setAllLevels(3)}>Gut everything</button>
-          <button className="btn ghost" onClick={() => setAllLevels(0)}>Clear all</button>
           <button className="btn" onClick={() => setOpenSecs(
             Object.fromEntries(spaces.map(sp => [sp.id, !allOpen])))}>
             {allOpen ? 'Collapse all' : 'Expand all'}</button>
+          <button className="btn ghost" onClick={() => {
+            if (confirm('Clear every scoped task?'))
+              setS(p => ({ ...p, checked: {}, spaceLevel: {} }));
+          }}>Clear all</button>
         </div>
 
         {sow.emptySpaces.length > 0 && (
@@ -950,18 +946,19 @@ Scope of work says {money0(sow.base)} at standard grade; this deal uses {money0(
                       onClick={() => setLevel(sp, l.v)}>{l.label}</button>
                   ))}
                 </span>
-                <span className={`ct${tot.count ? '' : ' zero'}`}>{tot.count} / {tot.total}</span>
-                <span className="amt">{tot.base > 0 ? money0(tot.base) : '—'}</span>
+                <span className={`ct${tot.count ? '' : ' zero'}`}>{tot.count} / {tot.taskCount}</span>
+                <span className="amt">{tot.cost > 0 ? money0(tot.cost) : '—'}</span>
               </div>
               <div className="sp-body">
                 <div className="sp-head-row">
-                  <span /><span className="l">Task</span>
-                  <span>Qty</span><span>Rental</span><span>Standard</span><span>High-end</span>
+                  <span /><span className="l">Task</span><span>Qty</span><span>Est. price</span><span>Cost</span>
                 </div>
                 {def.tasks.map(task => {
                   const key = taskKey(sp.id, task.id);
                   const on = !!s.checked[key];
                   const q = s.qty[key] !== undefined ? s.qty[key] : taskQty(task, sp, propShape);
+                  const price = taskCost(sp.kind, task, catalogPrices);
+                  const line = task.pctOfHard ? sow.hard * price / 100 : q * price;
                   return (
                     <div className={`sp-row${on ? ' on' : ''}`} key={task.id}>
                       <input type="checkbox" checked={on}
@@ -972,14 +969,13 @@ Scope of work says {money0(sow.base)} at standard grade; this deal uses {money0(
                         {task.note && <span className="nt">{task.note}</span>}
                       </div>
                       {task.pctOfHard
-                        ? <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-faint)' }}>—</div>
+                        ? <div className="dash">—</div>
                         : <NumInput fmt="raw" value={q}
                             onChange={v => setS(p => ({ ...p, qty: { ...p.qty, [key]: v } }))} />}
-                      {(['low', 'base', 'high'] as const).map(k => (
-                        <NumInput key={k} fmt="raw" value={taskPrice(sp.kind, task, k)}
-                          className={catalogPrices[`${sp.kind}.${task.id}.${k}`] !== undefined ? 'edited' : ''}
-                          onChange={v => setCatalogPrice(`${sp.kind}.${task.id}.${k}`, v)} />
-                      ))}
+                      <NumInput fmt="raw" value={price}
+                        className={catalogPrices[priceKey(sp.kind, task.id)] !== undefined ? 'edited' : ''}
+                        onChange={v => setCatalogPrice(priceKey(sp.kind, task.id), v)} />
+                      <div className={`line${on ? '' : ' off'}`}>{on ? money0(line) : '—'}</div>
                     </div>
                   );
                 })}
@@ -989,25 +985,21 @@ Scope of work says {money0(sow.base)} at standard grade; this deal uses {money0(
         })}
 
         <div className="sow-foot">
-          <div className="grp"><span className="lbl">Rental</span>
-            <span className="val">{money0(sow.low)}<span className="psf">{psf(sow.low, sqft)}</span></span></div>
-          <div className="grp"><span className="lbl">Standard</span>
-            <span className="val">{money0(sow.base)}<span className="psf">{psf(sow.base, sqft)}</span></span></div>
-          <div className="grp"><span className="lbl">High-end</span>
-            <span className="val">{money0(sow.high)}<span className="psf">{psf(sow.high, sqft)}</span></span></div>
+          <div className="grp"><span className="lbl">Rehab estimate</span>
+            <span className="val">{money0(sow.total)}<span className="psf">{psf(sow.total, sqft)}</span></span></div>
           <div className="grp"><span className="lbl">Tasks</span><span className="val">{sow.checkedCount}</span></div>
           <div className="push">
             <button className="btn" onClick={printSow} disabled={!sow.checkedCount}>⬇ Print scope</button>
             <button className="btn primary" onClick={pushSow} disabled={!sow.checkedCount}>
-              Use as rehab budget</button>
+              Use as base rehab</button>
           </div>
         </div>
 
         <p className="footnote">
-          The three price columns are finish grades, and they feed the three rehab scenarios directly:
-          rental grade becomes your low case, standard your base, high-end your high. Prices are shared
-          across every deal — correct one after a real bid and every future underwrite is right. What this
-          deal owns is which tasks are scoped, each room&apos;s area, and any quantity you override.
+          Prices are shared across every deal — correct one after a real bid and every future underwrite
+          is right. What this deal owns is which tasks are scoped, each room&apos;s area, and any quantity
+          you override. Pushing sets your <b>base</b> rehab scenario; low and high stay yours, since they
+          are judgement about risk rather than arithmetic.
         </p>
       </section>
 

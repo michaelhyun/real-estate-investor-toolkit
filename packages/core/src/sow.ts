@@ -19,11 +19,10 @@
         generating a real instance per room from the property itself, each with
         its own editable area.
 
-     3. SCOPE AMBIGUITY — "kitchen remodel" is $25k or $120k. Answered twice:
-        a level preset per space (skip / refresh / renovate / gut) that checks a
-        coherent set of tasks in one click, and three price points per task read
-        as finish grade — rental, standard, high-end — which are the same three
-        numbers that drive the low/base/high rehab scenarios.
+     3. SCOPE AMBIGUITY — "kitchen remodel" is $25k or $120k. Answered by a
+        level preset per space (skip / refresh / renovate / gut) that checks a
+        coherent set of tasks in one click. Depth of scope is what the preset
+        decides; each task then carries one price you can correct.
 
      4. UNIT PRICE DRIFT — answered by the shared catalog: correct a price once
         after a real bid and every future deal is right. */
@@ -49,7 +48,8 @@ export interface SowTask {
   unit: Unit;
   basis: Basis;
   qty: number;
-  low: number; base: number; high: number;
+  /** one estimated unit cost — edit it once and every deal inherits it */
+  cost: number;
   levels: Level[];
   note?: string;
   /** commonly forgotten — surfaced even when its space is left alone */
@@ -76,9 +76,9 @@ export interface SpaceDef {
 
 const t = (
   id: string, desc: string, unit: Unit, basis: Basis, qty: number,
-  low: number, base: number, high: number, levels: Level[],
+  low: number, cost: number, high: number, levels: Level[],
   opts: { note?: string; missed?: boolean; pctOfHard?: boolean } = {},
-): SowTask => ({ id, desc, unit, basis, qty, low, base, high, levels, ...opts });
+): SowTask => ({ id, desc, unit, basis, qty, cost, levels, ...opts });
 
 /* ------------------------------------------------------------ room catalogs */
 
@@ -437,18 +437,30 @@ export const taskKey = (spaceId: string, taskId: string) => `${spaceId}.${taskId
 
 export interface SpaceTotal {
   id: string; label: string; room: boolean;
-  low: number; base: number; high: number; count: number; total: number;
+  cost: number; count: number; taskCount: number;
 }
 
 export interface SowTotals {
-  low: number; base: number; high: number;
-  hardLow: number; hardBase: number; hardHigh: number;
+  total: number;
+  /** hard costs, i.e. everything the percent lines bill against */
+  hard: number;
   spaces: SpaceTotal[];
   checkedCount: number;
   /** spaces with nothing scoped — the omission check */
   emptySpaces: string[];
   /** commonly-missed tasks that are still unchecked */
   missedUnchecked: { key: string; space: string; desc: string }[];
+}
+
+/** The price key for a task — shared across every room of that kind, and
+    across every deal. */
+export const priceKey = (kind: string, taskId: string) => `${kind}.${taskId}`;
+
+export function taskCost(
+  kind: string, task: SowTask, prices: Record<string, number>,
+): number {
+  const v = prices[priceKey(kind, task.id)];
+  return v !== undefined ? v : task.cost;
 }
 
 export function computeSow(
@@ -458,19 +470,14 @@ export function computeSow(
   prices: Record<string, number>,
   p: PropertyShape,
 ): SowTotals {
-  const priceOf = (kind: string, task: SowTask, k: 'low' | 'base' | 'high') => {
-    const v = prices[`${kind}.${task.id}.${k}`];
-    return v !== undefined ? v : task[k];
-  };
-
-  let hardLow = 0, hardBase = 0, hardHigh = 0, checkedCount = 0;
+  let hard = 0, checkedCount = 0;
   const emptySpaces: string[] = [];
   const missedUnchecked: { key: string; space: string; desc: string }[] = [];
 
   /* hard costs first — percent lines ride on their total */
   const raw = spaces.map(sp => {
     const def = DEF_BY_KIND[sp.kind];
-    let low = 0, base = 0, high = 0, count = 0;
+    let cost = 0, count = 0;
     for (const task of def.tasks) {
       const key = taskKey(sp.id, task.id);
       if (!checked[key]) {
@@ -480,32 +487,25 @@ export function computeSow(
       count++;
       if (task.pctOfHard) continue;
       const q = qtyOverride[key] !== undefined ? qtyOverride[key] : taskQty(task, sp, p);
-      low += q * priceOf(sp.kind, task, 'low');
-      base += q * priceOf(sp.kind, task, 'base');
-      high += q * priceOf(sp.kind, task, 'high');
+      cost += q * taskCost(sp.kind, task, prices);
     }
     if (count === 0) emptySpaces.push(sp.label);
     checkedCount += count;
-    hardLow += low; hardBase += base; hardHigh += high;
-    return { sp, def, low, base, high, count };
+    hard += cost;
+    return { sp, def, cost, count };
   });
 
-  const spaceTotals: SpaceTotal[] = raw.map(({ sp, def, low, base, high, count }) => {
+  const spaceTotals: SpaceTotal[] = raw.map(({ sp, def, cost, count }) => {
     for (const task of def.tasks) {
       if (!task.pctOfHard || !checked[taskKey(sp.id, task.id)]) continue;
-      low += hardLow * priceOf(sp.kind, task, 'low') / 100;
-      base += hardBase * priceOf(sp.kind, task, 'base') / 100;
-      high += hardHigh * priceOf(sp.kind, task, 'high') / 100;
+      cost += hard * taskCost(sp.kind, task, prices) / 100;
     }
-    return { id: sp.id, label: sp.label, room: sp.room, low, base, high, count, total: def.tasks.length };
+    return { id: sp.id, label: sp.label, room: sp.room, cost, count, taskCount: def.tasks.length };
   });
 
   return {
-    low: spaceTotals.reduce((a, x) => a + x.low, 0),
-    base: spaceTotals.reduce((a, x) => a + x.base, 0),
-    high: spaceTotals.reduce((a, x) => a + x.high, 0),
-    hardLow, hardBase, hardHigh,
-    spaces: spaceTotals, checkedCount, emptySpaces, missedUnchecked,
+    total: spaceTotals.reduce((a, x) => a + x.cost, 0),
+    hard, spaces: spaceTotals, checkedCount, emptySpaces, missedUnchecked,
   };
 }
 

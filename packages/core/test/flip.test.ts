@@ -11,8 +11,8 @@ import {
 } from '../src/flip';
 import { cityTransferTax, findCity, countyTransferTax } from '../src/bayAreaCities';
 import {
-  buildSpaces, computeSow, applyLevel, taskKey, taskQty, SPACE_DEFS, DEF_BY_KIND,
-  type PropertyShape, type SpaceInstance,
+  buildSpaces, computeSow, applyLevel, taskKey, taskQty, priceKey, SPACE_DEFS, DEF_BY_KIND,
+  type PropertyShape,
 } from '../src/sow';
 
 const base = (over: Partial<FlipState> = {}): FlipState => ({ ...defaultFlipState(), ...over });
@@ -330,11 +330,8 @@ describe('scope of work', () => {
     }
   });
 
-  it('every task prices low <= base <= high', () => {
-    for (const d of SPACE_DEFS) for (const t of d.tasks) {
-      expect(t.low).toBeLessThanOrEqual(t.base);
-      expect(t.base).toBeLessThanOrEqual(t.high);
-    }
+  it('every task carries a positive cost', () => {
+    for (const d of SPACE_DEFS) for (const t of d.tasks) expect(t.cost).toBeGreaterThan(0);
   });
 
   it('scales room-area tasks by that room, not the whole house', () => {
@@ -352,7 +349,7 @@ describe('scope of work', () => {
   it('prices the same task once per room instance', () => {
     const oneBath = sow(on([taskKey('bathroom-1', 'shower-tile')]));
     const twoBaths = sow(on([taskKey('bathroom-1', 'shower-tile'), taskKey('bathroom-2', 'shower-tile')]));
-    near(twoBaths.base, oneBath.base * 2);
+    near(twoBaths.total, oneBath.total * 2);
   });
 
   it('a level preset scopes a room in one move', () => {
@@ -367,7 +364,7 @@ describe('scope of work', () => {
 
   it('levels get dearer as they get deeper', () => {
     const bath = find('bathroom-1');
-    const cost = (lv: 1 | 2 | 3) => sow(applyLevel(bath, lv, {})).base;
+    const cost = (lv: 1 | 2 | 3) => sow(applyLevel(bath, lv, {})).total;
     expect(cost(1)).toBeLessThan(cost(2));
     expect(cost(2)).toBeLessThan(cost(3));
   });
@@ -407,36 +404,36 @@ describe('scope of work', () => {
 
   it('honours a quantity override', () => {
     const key = taskKey('bedroom-1', 'recessed');
-    near(sow(on([key]), { [key]: 10 }).base,
-         10 * DEF_BY_KIND.bedroom.tasks.find(t => t.id === 'recessed')!.base);
+    near(sow(on([key]), { [key]: 10 }).total,
+         10 * DEF_BY_KIND.bedroom.tasks.find(t => t.id === 'recessed')!.cost);
   });
 
   it('honours a shared price override without touching the catalog', () => {
     const key = taskKey('bathroom-1', 'toilet');
-    near(sow(on([key]), {}, { 'bathroom.toilet.base': 9999 }).base, 9999);
-    expect(DEF_BY_KIND.bathroom.tasks.find(t => t.id === 'toilet')!.base).not.toBe(9999);
+    near(sow(on([key]), {}, { [priceKey('bathroom', 'toilet')]: 9999 }).total, 9999);
+    expect(DEF_BY_KIND.bathroom.tasks.find(t => t.id === 'toilet')!.cost).not.toBe(9999);
   });
 
   it('a price override reaches every room of that kind at once', () => {
     const keys = [taskKey('bathroom-1', 'toilet'), taskKey('bathroom-2', 'toilet')];
-    near(sow(on(keys), {}, { 'bathroom.toilet.base': 500 }).base, 1000);
+    near(sow(on(keys), {}, { [priceKey('bathroom', 'toilet')]: 500 }).total, 1000);
   });
 
   it('percent lines bill off hard costs and never off each other', () => {
     const hard = taskKey('bathroom-1', 'shower-tile');
     const only = sow(on([hard]));
     const withPct = sow(on([hard, taskKey('soft', 'gc'), taskKey('soft', 'contingency')]));
-    const gc = DEF_BY_KIND.soft.tasks.find(t => t.id === 'gc')!.base;
-    const cont = DEF_BY_KIND.soft.tasks.find(t => t.id === 'contingency')!.base;
-    near(withPct.hardBase, only.base);
-    near(withPct.base, only.base * (1 + gc / 100 + cont / 100));
+    const gc = DEF_BY_KIND.soft.tasks.find(t => t.id === 'gc')!.cost;
+    const cont = DEF_BY_KIND.soft.tasks.find(t => t.id === 'contingency')!.cost;
+    near(withPct.hard, only.total);
+    near(withPct.total, only.total * (1 + gc / 100 + cont / 100));
   });
 
   it('space subtotals add up to the grand total', () => {
     const all = Object.fromEntries(spaces.flatMap(sp =>
       DEF_BY_KIND[sp.kind].tasks.map(t => [taskKey(sp.id, t.id), true])));
     const t = sow(all);
-    near(t.base, t.spaces.reduce((a, x) => a + x.base, 0), 1);
+    near(t.total, t.spaces.reduce((a, x) => a + x.cost, 0), 1);
     expect(t.emptySpaces).toEqual([]);
   });
 
@@ -446,7 +443,7 @@ describe('scope of work', () => {
     spaces.reduce((c, sp) => applyLevel(sp, level, c), {} as Record<string, boolean>);
 
   it('a whole-house refresh prices as a cosmetic job', () => {
-    const psf = sow(scopeAll(1)).base / prop.sqft;
+    const psf = sow(scopeAll(1)).total / prop.sqft;
     expect(psf).toBeGreaterThan(55);
     expect(psf).toBeLessThan(120);
   });
@@ -456,15 +453,15 @@ describe('scope of work', () => {
      landscape all at once — not a typical project. These bands say the maximum
      is plausible, not that it is what anyone would scope. */
   it('renovating every single space is a major job, not a mid-scope one', () => {
-    const psf = sow(scopeAll(2)).base / prop.sqft;
+    const psf = sow(scopeAll(2)).total / prop.sqft;
     expect(psf).toBeGreaterThan(220);
     expect(psf).toBeLessThan(360);
   });
 
   it('gutting every single space sits at the top of the Bay Area range', () => {
     const t = sow(scopeAll(3));
-    expect(t.hardBase / prop.sqft).toBeGreaterThan(280);
-    expect(t.hardBase / prop.sqft).toBeLessThan(460);
+    expect(t.hard / prop.sqft).toBeGreaterThan(280);
+    expect(t.hard / prop.sqft).toBeLessThan(460);
   });
 
   /* The scope people actually write: gut the wet rooms where the money shows,
@@ -476,7 +473,7 @@ describe('scope of work', () => {
       c = applyLevel(find(id), 1, c);
     for (const id of ['roof', 'electrical', 'hvac', 'exterior', 'landscape', 'demo', 'soft'])
       c = applyLevel(find(id), 2, c);
-    const psf = sow(c).base / prop.sqft;
+    const psf = sow(c).total / prop.sqft;
     expect(psf).toBeGreaterThan(120);
     expect(psf).toBeLessThan(300);
   });
@@ -485,7 +482,7 @@ describe('scope of work', () => {
      Bay Area contractor would recognise. */
   it('prices a single bathroom the way a Bay Area bathroom prices', () => {
     const bath = find('bathroom-1');
-    const at = (lv: 1 | 2 | 3) => sow(applyLevel(bath, lv, {})).base;
+    const at = (lv: 1 | 2 | 3) => sow(applyLevel(bath, lv, {})).total;
     expect(at(1)).toBeGreaterThan(2500); expect(at(1)).toBeLessThan(9000);
     expect(at(2)).toBeGreaterThan(11000); expect(at(2)).toBeLessThan(24000);
     expect(at(3)).toBeGreaterThan(18000); expect(at(3)).toBeLessThan(40000);
@@ -493,7 +490,7 @@ describe('scope of work', () => {
 
   it('prices a single kitchen the way a Bay Area kitchen prices', () => {
     const kit = find('kitchen-1');
-    const at = (lv: 1 | 2 | 3) => sow(applyLevel(kit, lv, {})).base;
+    const at = (lv: 1 | 2 | 3) => sow(applyLevel(kit, lv, {})).total;
     expect(at(1)).toBeGreaterThan(12000); expect(at(1)).toBeLessThan(30000);
     expect(at(3)).toBeGreaterThan(38000); expect(at(3)).toBeLessThan(85000);
   });
@@ -507,11 +504,12 @@ describe('scope of work', () => {
     expect(yard[taskKey('landscape', 'sod')]).toBe(true);
   });
 
-  it('low is meaningfully cheaper than high on any real scope', () => {
-    const t = sow(scopeAll(2));
-    expect(t.low).toBeLessThan(t.base);
-    expect(t.base).toBeLessThan(t.high);
-    expect(t.high / t.low).toBeGreaterThan(1.5);
+  it('a shared price correction reaches every deal, not just this one', () => {
+    const key = taskKey('kitchen-1', 'appliances');
+    const stock = sow(on([key])).total;
+    const corrected = sow(on([key]), {}, { [priceKey('kitchen', 'appliances')]: 9000 }).total;
+    expect(corrected).toBe(9000);
+    expect(corrected).not.toBe(stock);
   });
 });
 
