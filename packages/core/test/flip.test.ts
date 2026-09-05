@@ -24,26 +24,25 @@ describe('computeFlip — structure', () => {
     );
   });
 
-  it('derives the hold period from all three phases', () => {
-    const r = computeFlip(base({ rehabMonths: 5, domDays: 21, escrowDays: 30 }));
-    near(r.rehabPeriod, 5);
-    near(r.holdMonths, 5 + 51 / 30.4375, 0.01);
+  it('derives the hold period from all three phases, all in days', () => {
+    const r = computeFlip(base({ rehabDays: 150, domDays: 21, escrowDays: 30 }));
+    near(r.rehabPeriod, 150 / 30.4375, 0.01);
+    near(r.holdMonths, 201 / 30.4375, 0.01);
   });
 
-  it('spends the estimate plus its buffer, and counts the buffer once', () => {
-    const r = computeFlip(base({ rehabEst: 200000, rehabBuffer: 20000 }));
-    near(r.rehabEst, 200000);
-    near(r.rehabBuffer, 20000);
-    near(r.rehabTotal, 220000);
+  it('spends the rehab scenario it was asked for', () => {
+    const s = base({ rehab: { low: 100000, base: 200000, high: 300000 } });
+    near(computeFlip(s, 'base', 'low').rehabTotal, 100000);
+    near(computeFlip(s, 'base', 'base').rehabTotal, 200000);
+    near(computeFlip(s, 'base', 'high').rehabTotal, 300000);
   });
 
-  it('a rehab override replaces the whole budget, buffer included', () => {
-    const r = computeFlip(base({ rehabEst: 200000, rehabBuffer: 20000 }), 'base', 175000);
-    near(r.rehabTotal, 175000);
+  it('a rehab override replaces the scenario entirely', () => {
+    near(computeFlip(base(), 'base', 'base', undefined, 175000).rehabTotal, 175000);
   });
 
   it('prices property tax off the reassessed purchase price, not the old roll', () => {
-    const s = base({ price: 800000, taxRatePct: 1.25, rehabMonths: 6, domDays: 0, escrowDays: 0 });
+    const s = base({ price: 800000, taxRatePct: 1.25, rehabDays: 182.625, domDays: 0, escrowDays: 0 });
     const r = computeFlip(s);
     near(r.propertyTax, 800000 * 0.0125 * 0.5, 1);
   });
@@ -72,7 +71,7 @@ describe('cash conservation — the check that catches double-counted principal'
   it('holds in hard money mode', () => conserves(base({ finMode: 'hard' })));
   it('holds in conventional amortizing mode', () => conserves(base({ finMode: 'conv', convIO: false })));
   it('holds in conventional interest-only mode', () => conserves(base({ finMode: 'conv', convIO: true })));
-  it('holds all cash', () => conserves(base({ finMode: 'conv', ltvPct: 0 })));
+  it('holds all cash', () => conserves(base({ finMode: 'cash' })));
   it('holds with an unfinanced rehab', () => conserves(base({ finMode: 'hard', rehabFinancedPct: 0 })));
 
   it('excludes principal from the P&L but includes it in peak cash', () => {
@@ -97,14 +96,29 @@ describe('cash conservation — the check that catches double-counted principal'
 });
 
 describe('all cash', () => {
-  it('zero LTV means no loan, no financing cost, and peak cash carries the deal', () => {
-    const r = computeFlip(base({ finMode: 'conv', ltvPct: 0, originationPct: 1, convFees: 1800 }));
+  it('has no loan, no lender and no financing cost at all', () => {
+    const r = computeFlip(base({ finMode: 'cash' }));
     near(r.loanAtClose, 0);
     near(r.payoffAtSale, 0);
     near(r.interest, 0);
+    near(r.finTotal, 0);
     near(r.downPayment, base().price);
-    /* only the flat lender fee survives with no loan to originate against */
-    near(r.finTotal, 1800);
+    expect(r.finLines).toEqual([]);
+  });
+
+  it('ties up the whole purchase and rehab in cash', () => {
+    const r = computeFlip(base({ finMode: 'cash' }));
+    near(r.cashForRehab, r.rehabTotal);
+    expect(r.peakCash).toBeGreaterThan(base().price);
+  });
+
+  it('earns less on cash than on leverage, but risks less too', () => {
+    const cash = computeFlip(base({ finMode: 'cash' }));
+    const hard = computeFlip(base({ finMode: 'hard' }));
+    /* no interest to pay, so more profit */
+    expect(cash.netProfit).toBeGreaterThan(hard.netProfit);
+    /* but far more of your own money on the table, so a lower return */
+    expect(cash.roi).toBeLessThan(hard.roi);
   });
 });
 
@@ -155,12 +169,12 @@ describe('max allowable offer', () => {
     const s = base({ minProfit: 75000, minProfitBasis: 'after' });
     const mao = solveMAO(s);
     expect(mao).toBeGreaterThan(0);
-    near(computeFlip(s, 'base', undefined, mao).netProfit, 75000, 200);
+    near(computeFlip(s, 'base', 'base', mao).netProfit, 75000, 200);
   });
 
   it('solves against pre-tax profit when that is the basis', () => {
     const s = base({ minProfit: 120000, minProfitBasis: 'pre' });
-    near(computeFlip(s, 'base', undefined, solveMAO(s)).preTaxProfit, 120000, 200);
+    near(computeFlip(s, 'base', 'base', solveMAO(s)).preTaxProfit, 120000, 200);
   });
 
   it('a higher profit floor forces a lower offer', () => {
@@ -176,7 +190,7 @@ describe('max allowable offer', () => {
       minProfit: 60000,
     });
     const mao = solveMAO(s);
-    near(computeFlip(s, 'base', undefined, mao).netProfit, 60000, 500);
+    near(computeFlip(s, 'base', 'base', mao).netProfit, 60000, 500);
   });
 
   it('returns 0 when the deal cannot clear the floor even for free', () => {
@@ -185,7 +199,7 @@ describe('max allowable offer', () => {
 
   it('the 70% rule is reported as a cross-check, not the answer', () => {
     const s = base();
-    near(seventyRule(s), 0.70 * s.arv.base - (s.rehabEst + s.rehabBuffer));
+    near(seventyRule(s), 0.70 * s.arv.base - s.rehab.base);
     /* on this deal the rule is stricter than a real underwrite — which is the
        whole point of showing both */
     expect(seventyRule(s)).toBeLessThan(solveMAO(s));
@@ -201,24 +215,17 @@ describe('sensitivity grid', () => {
     expect(g.arvAxis[6]).toBeGreaterThan(s.arv.high);
   });
 
-  it('runs the rehab axis from the estimate to twice the buffer, budget centred', () => {
-    const s = base({ rehabEst: 200000, rehabBuffer: 30000 });
+  it('spans the rehab scenarios with headroom past each end', () => {
+    const s = base();
     const g = buildSensitivity(s, 7);
     expect(g.rehabAxis).toHaveLength(7);
-    near(g.rehabAxis[0], 200000);          /* spend exactly the estimate */
-    near(g.rehabAxis[3], 230000);          /* the budget you underwrite */
-    near(g.rehabAxis[6], 260000);          /* burn twice the buffer */
-    near(g.baseRehab, 230000);
-  });
-
-  it('falls back to a sane axis when the buffer is zero', () => {
-    const g = buildSensitivity(base({ rehabEst: 200000, rehabBuffer: 0 }), 7);
-    expect(new Set(g.rehabAxis).size).toBe(7);
-    expect(g.rehabAxis[6]).toBeGreaterThan(g.rehabAxis[0]);
+    expect(g.rehabAxis[0]).toBeLessThan(s.rehab.low);
+    expect(g.rehabAxis[6]).toBeGreaterThan(s.rehab.high);
+    near(g.baseRehab, s.rehab.base);
   });
 
   it('increases left to right and decreases top to bottom', () => {
-    const g = buildSensitivity(base({ rehabBuffer: 40000 }), 7);
+    const g = buildSensitivity(base(), 7);
     for (const row of g.cells) {
       for (let i = 1; i < row.length; i++) expect(row[i]).toBeGreaterThan(row[i - 1]);
     }

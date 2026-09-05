@@ -50,14 +50,15 @@ function normalizeFlip(d: any): FlipState {
     name: d.name || '',
     prop: { ...base.prop, ...(d.prop || {}), urls: (d.prop?.urls || []).map((u: any) => ({ label: u.label || '', url: u.url || '' })) },
     arv: { ...base.arv, ...(d.arv || {}) },
-    /* Deals saved before rehab became estimate-plus-buffer carry a low/base/high
-       triple and a contingency percent. Read the base as the estimate and the
-       gap up to high as the buffer, falling back to the old contingency. */
-    rehabEst: d.rehabEst ?? d.rehab?.base ?? base.rehabEst,
-    rehabBuffer: d.rehabBuffer ?? (d.rehab
-      ? Math.max(0, (d.rehab.high ?? 0) - (d.rehab.base ?? 0))
-        || Math.round((d.rehab.base ?? 0) * ((d.contingencyPct ?? 0) / 100))
-      : base.rehabBuffer),
+    /* Deals saved under the estimate-plus-buffer shape fold back into a
+       triple; ones saved with rehab in months convert to days. */
+    rehab: d.rehab ?? (d.rehabEst !== undefined
+      ? { low: d.rehabEst, base: d.rehabEst + (d.rehabBuffer ?? 0), high: d.rehabEst + 2 * (d.rehabBuffer ?? 0) }
+      : base.rehab),
+    rehabDays: d.rehabDays ?? (d.rehabMonths !== undefined ? Math.round(d.rehabMonths * 30.4375) : base.rehabDays),
+    overrunDays: d.overrunDays ?? (d.overrunMonths !== undefined ? Math.round(d.overrunMonths * 30.4375) : base.overrunDays),
+    buyerCommPct: d.buyerCommPct ?? d.buyCommPct ?? base.buyerCommPct,
+    buySideCommPct: d.buySideCommPct ?? base.buySideCommPct,
     acq: { ...base.acq, ...(d.acq || {}) },
     hold: { ...base.hold, ...(d.hold || {}) },
     sell: { ...base.sell, ...(d.sell || {}) },
@@ -109,14 +110,15 @@ const Sec = ({ children, span = 3 }: { children: React.ReactNode; span?: number 
 
 /** A section-wide guidance row, sitting directly under its band header. */
 const G = ({ children }: { children: React.ReactNode }) => (
-  <tr className="guide"><td colSpan={4}>{children}</td></tr>
+  <tr className="guide"><td colSpan={5}>{children}</td></tr>
 );
 
 /** An editable row: label, the input, a static unit, then guidance. The note
     cell is only shown on tables marked `with-notes`. */
-function R({ label, hint, unit, children, ctl, note }: {
+function R({ label, hint, unit, children, ctl, note, amount }: {
   label: React.ReactNode; hint?: string; unit?: React.ReactNode;
   children?: React.ReactNode; ctl?: React.ReactNode; note?: React.ReactNode;
+  amount?: React.ReactNode;
 }) {
   return (
     <tr>
@@ -125,12 +127,14 @@ function R({ label, hint, unit, children, ctl, note }: {
         <td className="n">{children}</td>
         <td className="u">{unit}</td>
       </>}
+      <td className={`amt${amount == null ? ' muted' : ''}`}>{amount ?? '—'}</td>
       <td className="note">{note}</td>
     </tr>
   );
 }
 
 /** A read-only computed row. */
+/** A computed row: nothing to type, so the figure sits in the amount column. */
 function V({ label, hint, value, unit, cls, note }: {
   label: React.ReactNode; hint?: string; value: React.ReactNode;
   unit?: React.ReactNode; cls?: string; note?: React.ReactNode;
@@ -138,8 +142,9 @@ function V({ label, hint, value, unit, cls, note }: {
   return (
     <tr className={cls}>
       <td className="lb">{label}{hint && <span className="sub">{hint}</span>}</td>
-      <td className="n">{value}</td>
+      <td className="n" />
       <td className="u">{unit}</td>
+      <td className="amt">{value}</td>
       <td className="note">{note}</td>
     </tr>
   );
@@ -171,6 +176,7 @@ export default function FlipPage() {
   const setMap = (group: 'acq' | 'hold' | 'sell', id: string, v: number) =>
     setS(p => ({ ...p, [group]: { ...p[group], [id]: v } }));
   const setArv = (k: ScenarioKey, v: number) => setS(p => ({ ...p, arv: { ...p.arv, [k]: v } }));
+  const setRehab = (k: ScenarioKey, v: number) => setS(p => ({ ...p, rehab: { ...p.rehab, [k]: v } }));
 
   /* ---------- hydrate ---------- */
   useEffect(() => {
@@ -255,10 +261,14 @@ export default function FlipPage() {
     ? <span className="ok">in range</span>
     : <span className="warn">above the usual 7–9%</span>;
   const selIdx = 1;                       /* base ARV is the column to beat */
+  /* look a computed amount up by id so it can sit on its own input row */
+  const amt = (lines: CostLine[], id: string) => lines.find(l => l.id === id)?.amount ?? 0;
+  const allIn = s.price + rBase.acqTotal + rBase.rehabTotal + rBase.holdTotal + rBase.finTotal;
 
   const diverged = s.rehabSource === 'checklist' && checklist.checkedCount > 0 &&
-    (Math.abs(checklist.base - s.rehabEst) > 1 ||
-     Math.abs(Math.max(0, checklist.high - checklist.base) - s.rehabBuffer) > 1);
+    (Math.abs(checklist.base - s.rehab.base) > 1 ||
+     Math.abs(checklist.low - s.rehab.low) > 1 ||
+     Math.abs(checklist.high - s.rehab.high) > 1);
 
   /* ---------- actions ---------- */
   const setAddress = (v: string) =>
@@ -283,10 +293,9 @@ export default function FlipPage() {
        is a buffer you have actually itemised rather than a guessed percentage */
     setS(p => ({
       ...p, rehabSource: 'checklist',
-      rehabEst: Math.round(checklist.base),
-      rehabBuffer: Math.round(Math.max(0, checklist.high - checklist.base)),
+      rehab: { low: Math.round(checklist.low), base: Math.round(checklist.base), high: Math.round(checklist.high) },
     }));
-    toast('Rehab estimate and buffer updated from the checklist');
+    toast('Rehab budget updated from the checklist');
   }
 
   function saveDeal() {
@@ -420,18 +429,41 @@ export default function FlipPage() {
 
       {/* ============================================ TAB 1 — ASSUMPTIONS */}
       <section className={`pane${tab === 'assumptions' ? ' on' : ''}`}>
+        {/* the deal at a glance, before any of the detail below */}
+        <div className="sumry">
+          <div className="hero"><div className="k">Net profit</div>
+            <div className={`v ${rBase.netProfit < 0 ? 'neg' : rBase.netProfit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.netProfit)}</div>
+            <div className="s">after {s.taxPct}% tax</div></div>
+          <div><div className="k">Purchase</div><div className="v">{money0(s.price)}</div>
+            <div className="s">{psf(s.price, sqft)}</div></div>
+          <div><div className="k">ARV — base</div><div className="v">{money0(s.arv.base)}</div>
+            <div className="s">{psf(s.arv.base, sqft)}</div></div>
+          <div><div className="k">Rehab — base</div><div className="v">{money0(s.rehab.base)}</div>
+            <div className="s">{psf(s.rehab.base, sqft)}</div></div>
+          <div><div className="k">Gross spread</div><div className="v">{pct(rBase.grossSpread)}</div>
+            <div className="s">target 25–30%</div></div>
+          <div><div className="k">All-in cost</div><div className="v">{money0(allIn)}</div>
+            <div className="s">{psf(allIn, sqft)}</div></div>
+          <div><div className="k">Peak cash</div><div className="v">{money0(rBase.peakCash)}</div>
+            <div className="s">{s.finMode === 'cash' ? 'all cash' : s.finMode === 'hard' ? 'hard money' : 'conventional'}</div></div>
+          <div><div className="k">ROI · annual</div><div className="v">{pct(rBase.roi)}</div>
+            <div className="s">{pct(rBase.annualizedRoi)} annualized</div></div>
+          <div><div className="k">Hold</div><div className="v">{Math.round(rBase.holdMonths * 30.4375)}</div>
+            <div className="s">days · {rBase.holdMonths.toFixed(1)} mo</div></div>
+          <div><div className="k">Max offer</div><div className="v">{money0(mao)}</div>
+            <div className="s">for {money0(s.minProfit)} net</div></div>
+        </div>
+
         {city?.note && <div className="notice warn"><div><b>{city.name}</b>{city.note}</div></div>}
 
         <div className="sheet one"><table className="ss with-notes">
-          {/* table-layout is fixed, so the widths have to come from here — the
-              first row is a full-width band and would otherwise set them */}
           <colgroup>
-            <col style={{ width: 228 }} /><col style={{ width: 104 }} />
-            <col style={{ width: 54 }} /><col />
+            <col style={{ width: 228 }} /><col style={{ width: 96 }} />
+            <col style={{ width: 52 }} /><col style={{ width: 104 }} /><col />
           </colgroup>
           <tbody>
 
-          <Band span={4} tag={`${pct(rBase.grossSpread)} gross spread`}>Property &amp; deal</Band>
+          <Band span={5} tag={`${pct(rBase.grossSpread)} gross spread`}>Property &amp; deal</Band>
           <R label="City" note="Swings hugely by city — most of San Mateo and Santa Clara sit at the county floor; Oakland and Berkeley do not." ctl={
             <select className="sel-city" value={s.citySlug} onChange={ev => applyCity(ev.target.value)}>
               <option value="">Not listed — enter rates manually</option>
@@ -458,101 +490,102 @@ export default function FlipPage() {
             <input className="num small" value={s.prop.year} autoComplete="off"
               onChange={ev => setProp('year', ev.target.value)} />} />
 
-          <Sec span={4}>Purchase &amp; after-repair value</Sec>
-          <R label="Purchase price" unit={psf(s.price, sqft)}
+          <Sec span={5}>Purchase &amp; after-repair value</Sec>
+          <R label="Purchase price" unit={psf(s.price, sqft)} amount={money0(s.price)}
             note={<>70% rule says {money0(seventyRule(s))}; your own underwrite says {money0(mao)}.</>}>
             <Money value={s.price} onChange={v => set('price', v)} /></R>
-          <R label="ARV — low" unit={psf(s.arv.low, sqft)}
+          <R label="ARV — low" unit={psf(s.arv.low, sqft)} amount={money0(s.arv.low)}
             note="What it sells for in a slow month with a picky appraiser.">
             <Money value={s.arv.low} onChange={v => setArv('low', v)} /></R>
-          <R label="ARV — base" unit={psf(s.arv.base, sqft)}
+          <R label="ARV — base" unit={psf(s.arv.base, sqft)} amount={money0(s.arv.base)}
             note="Closed comps within half a mile and 90 days, adjusted to your finish.">
             <Money value={s.arv.base} onChange={v => setArv('base', v)} /></R>
-          <R label="ARV — high" unit={psf(s.arv.high, sqft)}
+          <R label="ARV — high" unit={psf(s.arv.high, sqft)} amount={money0(s.arv.high)}
             note="Top of the range if the finish lands. Never underwrite to it.">
             <Money value={s.arv.high} onChange={v => setArv('high', v)} /></R>
           <V cls="tot" label="Gross spread at base ARV" value={money0(s.arv.base - s.price)}
             unit={pct(rBase.grossSpread)}
             note={<><b>Target 25–30% of ARV.</b> You are at {pct(rBase.grossSpread)} — {spreadVerdict}.</>} />
 
-          <Band span={4} tag={s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}>Rehab budget</Band>
-          <G>Bay Area pricing: cosmetic <b>$90–160/sf</b>, full gut <b>$200–350/sf</b>. Yours is {money0(rBase.rehabPsf)}/sf all-in — {rehabVerdict}.</G>
-          <R label="Estimated rehab cost" unit={psf(s.rehabEst, sqft)}
-            note="Your honest scope priced out. Build it on the Cost Checklist tab and push it here.">
-            <Money value={s.rehabEst} onChange={v => set('rehabEst', v)} /></R>
-          <R label="Buffer" unit={s.rehabEst > 0 ? pct(s.rehabBuffer / s.rehabEst * 100) : ''}
-            note="Headroom in dollars. 10% of the estimate on a cosmetic scope, 15–20% on a gut or anything pre-1950.">
-            <Money value={s.rehabBuffer} onChange={v => set('rehabBuffer', v)} /></R>
-          <V cls="tot" label="Rehab budget" value={money0(rBase.rehabTotal)} unit={psf(rBase.rehabTotal, sqft)}
-            note={<>Estimate plus buffer — and the buffer also sets how far the Deal Model grid stress-tests you.</>} />
+          <Band span={5} tag={s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}>Rehab budget</Band>
+          <G>Bay Area pricing: cosmetic <b>$90–160/sf</b>, full gut <b>$200–350/sf</b>. Yours is {money0(rBase.rehabPsf)}/sf at base — {rehabVerdict}. Build it on the Cost Checklist tab and push it here.</G>
+          <R label="Rehab — low" unit={psf(s.rehab.low, sqft)} amount={money0(s.rehab.low)}
+            note="Everything goes right: no dry rot, no surprises behind the walls.">
+            <Money value={s.rehab.low} onChange={v => setRehab('low', v)} /></R>
+          <R label="Rehab — base" unit={psf(s.rehab.base, sqft)} amount={money0(s.rehab.base)}
+            note="What you would tell a partner the job costs. The deal lives on it.">
+            <Money value={s.rehab.base} onChange={v => setRehab('base', v)} /></R>
+          <R label="Rehab — high" unit={psf(s.rehab.high, sqft)} amount={money0(s.rehab.high)}
+            note="You open the walls and find why it was cheap. Honest case pre-1950.">
+            <Money value={s.rehab.high} onChange={v => setRehab('high', v)} /></R>
 
-          <Band span={4} tag={`${rBase.holdMonths.toFixed(1)} mo hold`}>Timeline</Band>
-          <G>Every extra month costs holding <b>and</b> interest at once. Bay Area flips run <b>5–8 months</b> door to door. Yours is {rBase.holdMonths.toFixed(1)} — {holdVerdict}.</G>
-          <R label="Rehab duration" unit="months"
-            note="Fold permits in. Bay Area plan check adds 2–4 months before a shovel moves.">
-            <Num value={s.rehabMonths} onChange={v => set('rehabMonths', v)} /></R>
-          <R label="Days on market" unit="days"
+          <Band span={5} tag={`${Math.round(rBase.holdMonths * 30.4375)} days`}>Timeline</Band>
+          <G>Every extra day costs holding <b>and</b> interest at once. Bay Area flips run <b>150–240 days</b> door to door. Yours is {Math.round(rBase.holdMonths * 30.4375)} — {holdVerdict}.</G>
+          <R label="Rehab duration" unit="days" amount={`${(s.rehabDays / 30.4375).toFixed(1)} mo`}
+            note="Fold permits in. Bay Area plan check adds 60–120 days before a shovel moves.">
+            <Num value={s.rehabDays} onChange={v => set('rehabDays', v)} /></R>
+          <R label="Days on market" unit="days" amount={`${(s.domDays / 30.4375).toFixed(1)} mo`}
             note="List to accepted offer. Bay Area ran 15–25 days through 2026.">
             <Num value={s.domDays} onChange={v => set('domDays', v)} /></R>
-          <R label="Escrow period" unit="days"
+          <R label="Escrow period" unit="days" amount={`${(s.escrowDays / 30.4375).toFixed(1)} mo`}
             note="Accepted offer to close. 21–30 days standard; a cash buyer can do 14.">
             <Num value={s.escrowDays} onChange={v => set('escrowDays', v)} /></R>
-          <R label="Schedule overrun" unit="months"
-            note="Add months to see what a slip costs. The cheapest stress test here.">
-            <Num value={s.overrunMonths} onChange={v => set('overrunMonths', v)} /></R>
-          <V cls="tot" label="Total hold period" value={rBase.holdMonths.toFixed(1)} unit="months"
-            note={<>A one-month slip costs roughly {money0(rBase.holdMonthly + rBase.interest / Math.max(1, rBase.holdMonths))} in holding plus interest.</>} />
+          <R label="Schedule overrun" unit="days" amount={`${(s.overrunDays / 30.4375).toFixed(1)} mo`}
+            note="Add days to see what a slip costs. The cheapest stress test here.">
+            <Num value={s.overrunDays} onChange={v => set('overrunDays', v)} /></R>
+          <V cls="tot" label="Total hold period" value={`${Math.round(rBase.holdMonths * 30.4375)} days`}
+            unit={`${rBase.holdMonths.toFixed(1)} mo`}
+            note={<>A 30-day slip costs roughly {money0(rBase.holdMonthly + rBase.interest / Math.max(1, rBase.holdMonths))}.</>} />
 
-          <Band span={4} tag={money0(rBase.acqTotal)}>Acquisition costs</Band>
+          <Band span={5} tag={money0(rBase.acqTotal)}>Acquisition costs</Band>
           <G><b>California sellers deliver a disclosure package before offers</b> — TDS, SPQ, NHD and usually pest, home and roof reports — so those lines default to $0. What the reports find belongs in rehab, not here.</G>
+          <R label="Buy-side commission" unit="%" amount={money0(amt(rBase.acqLines, 'buySideComm'))}
+            note="What you pay a buyer's agent to acquire. If you represent yourself it is income, not a cost.">
+            <Num value={s.buySideCommPct} onChange={v => set('buySideCommPct', v)} /></R>
           {ACQ_ITEMS.map(i => (
-            <R key={i.id} label={i.label} note={i.note}>
+            <R key={i.id} label={i.label} note={i.note} amount={money0(s.acq[i.id] ?? 0)}>
               <Money value={s.acq[i.id] ?? 0} onChange={v => setMap('acq', i.id, v)} /></R>
           ))}
-          {rBase.acqLines.filter(l => l.derived && l.amount !== 0).map((l, i) => (
+          {rBase.acqLines.filter(l => l.derived && l.id !== 'buySideComm' && l.amount !== 0).map((l, i) => (
             <V key={i} label={l.label} value={money0(l.amount)} unit="auto"
               note="Computed from the city preset and who pays." />
           ))}
           <V cls="tot" label="Total acquisition" value={money0(rBase.acqTotal)}
             unit={pct(s.price > 0 ? rBase.acqTotal / s.price * 100 : 0)}
-            note="0.5–1.5% of price in CA once the seller covers reports. Points live under Financing." />
+            note="Loan points are not here — they live under Financing." />
 
-          <Band span={4} tag={`${money0(rBase.holdMonthly)}/mo`}>Holding costs</Band>
-          <R label="Levied property tax rate" unit="%"
+          <Band span={5} tag={`${money0(rBase.holdMonthly)}/mo`}>Holding costs</Band>
+          <R label="Levied property tax rate" unit="%" amount={money0(rBase.propertyTax)}
             note="1% Prop 13 base plus local bonds. A published “effective rate” understates this by a third.">
             <Num value={s.taxRatePct} onChange={v => set('taxRatePct', v)} /></R>
-          <R label="Prior assessed value"
+          <R label="Prior assessed value" amount={rBase.supplementalTax > 0 ? money0(rBase.supplementalTax) : undefined}
             note="From the county assessor. Only used to break out the supplemental bill.">
             <Money value={s.priorAssessed} onChange={v => set('priorAssessed', v)} /></R>
-          <R label="Builder's risk insurance"
+          <R label="Builder's risk insurance" amount={money0(amt(rBase.holdLines, 'builderRisk'))}
             note="Covers the structure while it is open. 1–3% of rehab, or $150–300/mo." ctl={
             <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 3 }}>
               <NumInput fmt="raw" small value={s.builderRisk} onChange={v => set('builderRisk', v)} />
               <UnitToggle options={[{ u: '$', label: '$/mo' }, { u: '%', label: '% rehab' }]}
                 value={s.builderRiskUnit} onChange={u => set('builderRiskUnit', u as '$' | '%')} />
             </div>} />
-          <Sec span={4}>Monthly operating — enter $/mo, total at right</Sec>
+          <Sec span={5}>Monthly operating — enter $/mo, total over the hold at right</Sec>
           {HOLD_ITEMS.map(i => (
-            <R key={i.id} label={i.label} note={i.note} unit={money0((s.hold[i.id] ?? 0) * rBase.holdMonths)}>
+            <R key={i.id} label={i.label} note={i.note} unit="$/mo"
+              amount={money0((s.hold[i.id] ?? 0) * rBase.holdMonths)}>
               <Money value={s.hold[i.id] ?? 0} onChange={v => setMap('hold', i.id, v)} /></R>
           ))}
-          <V label="Property tax — reassessed" value={money0(rBase.propertyTax)} unit="auto"
-            note="Prop 13 resets assessed value to your purchase price at close." />
-          {rBase.supplementalTax > 0 &&
-            <V label="of which supplemental bill" value={money0(rBase.supplementalTax)} unit="incl."
-              note="Arrives weeks after close and surprises most first-timers." />}
           <V cls="tot" label={`Total over ${rBase.holdMonths.toFixed(1)} months`} value={money0(rBase.holdTotal)}
             note={<>{pct(s.arv.base > 0 ? rBase.holdTotal / s.arv.base * 100 : 0)} of ARV. Runs whether or not anyone is working on the house.</>} />
 
-          <Band span={4} tag={`${pct(rBase.sellPctOfSale)} of sale`}>Selling costs</Band>
+          <Band span={5} tag={`${pct(rBase.sellPctOfSale)} of sale`}>Selling costs</Band>
           <G>All-in Bay Area selling costs run <b>7–9% of sale price</b>. Yours are {pct(rBase.sellPctOfSale)} — {sellVerdict}. If you list it yourself, that commission is income to you, not a cost.</G>
-          <R label="Listing commission" unit="%"
+          <R label="Listing commission" unit="%" amount={money0(amt(rBase.sellLines, 'listComm'))}
             note="2.5% standard. Your own listing side is income, not an expense.">
             <Num value={s.listCommPct} onChange={v => set('listCommPct', v)} /></R>
-          <R label="Buyer agent commission" unit="%"
+          <R label="Buyer agent commission" unit="%" amount={money0(amt(rBase.sellLines, 'buyerComm'))}
             note="Negotiable since the NAR settlement, but 2.5% still gets it shown.">
-            <Num value={s.buyCommPct} onChange={v => set('buyCommPct', v)} /></R>
-          <R label="City transfer tax paid by"
+            <Num value={s.buyerCommPct} onChange={v => set('buyerCommPct', v)} /></R>
+          <R label="City transfer tax paid by" amount={money0(amt(rBase.sellLines, 'sellCityTax') + amt(rBase.sellLines, 'sellCountyTax'))}
             note={city ? `${city.name} custom pre-filled — on a large bill this is negotiable.`
                        : 'Local custom varies. Pick a city above to pre-fill it.'} ctl={
             <UnitToggle
@@ -560,101 +593,112 @@ export default function FlipPage() {
               value={s.transferPayer}
               onChange={u => set('transferPayer', u as FlipState['transferPayer'])} />} />
           {SELL_FLAT_ITEMS.map(i => (
-            <R key={i.id} label={i.label} note={i.note}>
+            <R key={i.id} label={i.label} note={i.note} amount={money0(s.sell[i.id] ?? 0)}>
               <Money value={s.sell[i.id] ?? 0} onChange={v => setMap('sell', i.id, v)} /></R>
           ))}
-          <R label="Staging — per month" note="$1–1.5k/mo through days on market plus escrow.">
+          <R label="Staging — per month" unit="$/mo" amount={money0(amt(rBase.sellLines, 'stagingHold'))}
+            note="$1–1.5k/mo through days on market plus escrow.">
             <Money value={s.stagingMo} onChange={v => set('stagingMo', v)} /></R>
-          <R label="Retrofit compliance"
+          <R label="Retrofit compliance" amount={money0(s.retrofit)}
             note={city ? `Required in ${city.name}: ${city.retrofit.map(x => x.label).join(', ')}.`
                        : 'Lateral certificate, water heater strapping, alarms — varies by city.'}>
             <Money value={s.retrofit} onChange={v => set('retrofit', v)} /></R>
-          <R label="Seller concessions" unit="%"
+          <R label="Seller concessions" unit="%" amount={money0(amt(rBase.sellLines, 'concessions'))}
             note="Credits after the buyer’s inspection. 0.5% is light; 1% safer on an older house.">
             <Num value={s.concessionsPct} onChange={v => set('concessionsPct', v)} /></R>
-          <R label="CA 3.33% withholding"
+          <R label="CA 3.33% withholding" amount={rBase.withholding > 0 ? money0(rBase.withholding) : undefined}
             note="Credited against the tax below. Moves cash timing, never profit." ctl={
             <Switch checked={s.withholdingOn} onChange={v => set('withholdingOn', v)} />} />
-          {rBase.sellLines.filter(l => l.derived && l.amount !== 0).map((l, i) => (
-            <V key={i} label={l.label} value={money0(l.amount)} note="Computed at base ARV." />
-          ))}
           <V cls="tot" label="Total selling costs" value={money0(rBase.sellTotal)} unit={pct(rBase.sellPctOfSale)}
             note="Recomputed per ARV scenario — most of these are percentages of sale." />
 
-          <Band span={4} tag={s.finMode === 'hard' ? 'hard money' : (s.ltvPct > 0 ? 'conventional' : 'all cash')}>Financing</Band>
-          <G>Hard money funds the rehab in draws; conventional funds only the purchase and leaves the rehab to your cash. <b>Set conventional LTV to 0 to model an all-cash purchase.</b></G>
+          <Band span={5} tag={s.finMode === 'hard' ? 'hard money' : s.finMode === 'cash' ? 'all cash' : 'conventional'}>Financing</Band>
+          <G>Hard money funds the rehab in draws; conventional funds only the purchase; all cash ties up every dollar but pays no interest at all.</G>
           <R label="Instrument" note="Switching swaps the input set rather than reinterpreting it." ctl={
-            <UnitToggle options={[{ u: 'hard', label: 'Hard money' }, { u: 'conv', label: 'Conventional' }]}
+            <UnitToggle options={[{ u: 'hard', label: 'Hard money' }, { u: 'conv', label: 'Conventional' }, { u: 'cash', label: 'All cash' }]}
               value={s.finMode} onChange={u => set('finMode', u as FlipState['finMode'])} />} />
-          {s.finMode === 'hard' ? <>
-            <R label="Loan-to-cost on purchase" unit="%" note="Bay Area hard money runs 85–90% of purchase.">
+          {s.finMode === 'hard' && <>
+            <R label="Loan-to-cost on purchase" unit="%" amount={money0(rBase.loanAtClose)}
+              note="Bay Area hard money runs 85–90% of purchase.">
               <Num value={s.ltcPct} onChange={v => set('ltcPct', v)} /></R>
-            <R label="Rehab financed" unit="%" note="Usually 100%, released in draws as work is inspected.">
+            <R label="Rehab financed" unit="%" amount={money0(rBase.rehabTotal - rBase.cashForRehab)}
+              note="Usually 100%, released in draws as work is inspected.">
               <Num value={s.rehabFinancedPct} onChange={v => set('rehabFinancedPct', v)} /></R>
-            <R label="Interest rate" unit="%" note="9.5–12% in 2026. Interest-only on the drawn balance.">
+            <R label="Interest rate" unit="%" amount={money0(rBase.interest)}
+              note="9.5–12% in 2026. Interest-only on the drawn balance.">
               <Num value={s.hardRate} onChange={v => set('hardRate', v)} /></R>
-            <R label="Points" unit="%" note="1.5–3 points at close on purchase loan plus rehab holdback.">
+            <R label="Points" unit="%" amount={money0(amt(rBase.finLines, 'points'))}
+              note="1.5–3 points at close on purchase loan plus rehab holdback.">
               <Num value={s.pointsPct} onChange={v => set('pointsPct', v)} /></R>
-            <R label="Lender fees" note="Underwriting, doc prep, legal. $1–2k typical.">
+            <R label="Lender fees" amount={money0(s.hardFees)} note="Underwriting, doc prep, legal. $1–2k typical.">
               <Money value={s.hardFees} onChange={v => set('hardFees', v)} /></R>
-            <R label="Draws / fee each" note="$250–500 each plus an inspection delay. Fewer, larger draws cost less." ctl={
+            <R label="Draws / fee each" amount={money0(amt(rBase.finLines, 'drawFees'))}
+              note="$250–500 each plus an inspection delay. Fewer, larger draws cost less." ctl={
               <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 3 }}>
                 <NumInput fmt="raw" small value={s.drawCount} onChange={v => set('drawCount', v)} />
                 <NumInput small value={s.drawFee} onChange={v => set('drawFee', v)} />
               </div>} />
-            <R label="Minimum interest" unit="months" note="Most lenders guarantee 3–6 months even if you pay off early.">
+            <R label="Minimum interest" unit="mo" note="Most lenders guarantee 3–6 months even if you pay off early.">
               <Num value={s.minInterestMonths} onChange={v => set('minInterestMonths', v)} /></R>
-            <R label="Extension fee" unit="%" note="Charged when the overrun above is more than zero. 0.5–1 point.">
+            <R label="Extension fee" unit="%" amount={money0(amt(rBase.finLines, 'extension'))}
+              note="Charged when the overrun above is more than zero. 0.5–1 point.">
               <Num value={s.extensionFeePct} onChange={v => set('extensionFeePct', v)} /></R>
-          </> : <>
-            <R label="Loan-to-value on purchase" unit="%" note="Against purchase price, not total cost. Set to 0 for all cash.">
+          </>}
+          {s.finMode === 'conv' && <>
+            <R label="Loan-to-value on purchase" unit="%" amount={money0(rBase.loanAtClose)}
+              note="Against purchase price, not total cost. A conventional loan funds no rehab.">
               <Num value={s.ltvPct} onChange={v => set('ltvPct', v)} /></R>
-            <R label="Interest rate" unit="%" note="Investment property prices 50–75bp over owner-occupied.">
+            <R label="Interest rate" unit="%" amount={money0(rBase.interest)}
+              note="Investment property prices 50–75bp over owner-occupied.">
               <Num value={s.convRate} onChange={v => set('convRate', v)} /></R>
-            <R label="Term" unit="years" note="Sets the payment. Paid off at sale regardless.">
+            <R label="Term" unit="yrs" note="Sets the payment. Paid off at sale regardless.">
               <Num value={s.convTerm} onChange={v => set('convTerm', v)} /></R>
             <R label="Interest only" note="Take it on a flip — amortising parks cash in principal you get back anyway." ctl={
               <Switch checked={s.convIO} onChange={v => set('convIO', v)} />} />
-            <R label="Origination" unit="%" note="On the loan amount only. No rehab commitment to charge against.">
+            <R label="Origination" unit="%" amount={money0(amt(rBase.finLines, 'origination'))}
+              note="On the loan amount only. No rehab commitment to charge against.">
               <Num value={s.originationPct} onChange={v => set('originationPct', v)} /></R>
-            <R label="Lender fees" note="Underwriting, appraisal review, doc prep.">
+            <R label="Lender fees" amount={money0(s.convFees)} note="Underwriting, appraisal review, doc prep.">
               <Money value={s.convFees} onChange={v => set('convFees', v)} /></R>
-            <R label="Prepayment penalty" unit="%" note="Some investor products carry one; a flip pays off inside the window.">
+            <R label="Prepayment penalty" unit="%" amount={money0(amt(rBase.finLines, 'prepay'))}
+              note="Some investor products carry one; a flip pays off inside the window.">
               <Num value={s.prepayPct} onChange={v => set('prepayPct', v)} /></R>
           </>}
-          {rBase.finLines.filter(l => l.amount !== 0).map((l, i) => (
-            <V key={i} label={l.label} value={money0(l.amount)} note={l.hint} />
-          ))}
+          {s.finMode === 'cash' &&
+            <V label="No loan, no lender, no interest" value={money0(0)}
+              note="Every dollar of purchase and rehab is yours, which is why peak cash below equals the whole deal." />}
           <V cls="tot" label="Total financing cost" value={money0(rBase.finTotal)}
-            note={<>{pct(s.arv.base > 0 ? rBase.finTotal / s.arv.base * 100 : 0)} of ARV — after rehab, usually the second-largest cost.</>} />
+            note={s.finMode === 'cash' ? 'Nothing to pay a lender.'
+              : `${pct(s.arv.base > 0 ? rBase.finTotal / s.arv.base * 100 : 0)} of ARV — after rehab, usually the second-largest cost.`} />
           <V label="Loan at close" value={money0(rBase.loanAtClose)} note="Funded at close, before any rehab draw." />
           <V label="Down payment" value={money0(rBase.downPayment)} note="Purchase price less the loan." />
           <V label="Cash needed for rehab" value={money0(rBase.cashForRehab)}
-            note={s.finMode === 'conv'
-              ? 'The whole rehab — a conventional purchase loan funds none of it.'
-              : 'Only the unfinanced share; the lender reimburses the rest by draw.'} />
+            note={s.finMode === 'hard' ? 'Only the unfinanced share; the lender reimburses the rest by draw.'
+                                       : 'The whole rehab — no lender is funding any of it.'} />
           <V cls="grand" label="Peak cash out of pocket" value={money0(rBase.peakCash)}
             note="The number that decides whether you can do this deal at all." />
 
-          <Band span={4}>Tax &amp; thresholds</Band>
-          <R label="Blended tax rate" unit="%"
+          <Band span={5}>Tax &amp; thresholds</Band>
+          <R label="Blended tax rate" unit="%" amount={money0(rBase.tax)}
             note="Ordinary income, likely dealer property — no capital gains, no 1031. 40–50% typical.">
             <Num value={s.taxPct} onChange={v => set('taxPct', v)} /></R>
-          <R label="A loss shelters other income"
-            note="Off by default so a bad deal shows its full loss." ctl={
+          <R label="A loss shelters other income" note="Off by default so a bad deal shows its full loss." ctl={
             <Switch checked={s.lossOffsetsIncome} onChange={v => set('lossOffsetsIncome', v)} />} />
-          <R label="Minimum profit" note="$50–75k is a common Bay Area floor. Max allowable offer solves against it.">
+          <R label="Minimum profit" amount={money0(mao)}
+            note="Your floor. The amount at right is the most you can pay and still hit it.">
             <Money value={s.minProfit} onChange={v => set('minProfit', v)} /></R>
           <R label="Floor is measured"
             note="Pre-tax is what flippers quote each other; after-tax is what reaches your account." ctl={
             <UnitToggle options={[{ u: 'after', label: 'after tax' }, { u: 'pre', label: 'pre-tax' }]}
               value={s.minProfitBasis} onChange={u => set('minProfitBasis', u as 'after' | 'pre')} />} />
+          <V cls="grand" label="Net profit after tax" value={money(rBase.netProfit)}
+            note={<>{pct(rBase.roi)} on {money0(rBase.peakCash)} of cash, {pct(rBase.annualizedRoi)} annualized.</>} />
         </tbody></table></div>
 
         {diverged && (
           <div className="notice warn" style={{ marginTop: 12 }}>
             <div><b>Checklist and budget have diverged</b>
-              Checklist estimates {money0(checklist.base)}; this deal uses {money0(s.rehabEst)}.</div>
+              Checklist says {money0(checklist.base)} at base; this deal uses {money0(s.rehab.base)}.</div>
             <div className="act">
               <button onClick={pushChecklist}>Re-sync</button>
               <button onClick={() => set('rehabSource', 'manual')}>Keep mine</button>
@@ -718,11 +762,10 @@ export default function FlipPage() {
                       arr.reduce((best, x, i) => Math.abs(x - v) < Math.abs(arr[best] - v) ? i : best, 0);
                     const baseR = nearest(sens.rehabAxis, sens.baseRehab);
                     const baseA = nearest(sens.arvAxis, sens.baseArv);
-                    const over = sens.rehabAxis[ri] - s.rehabEst;
                     return (
                       <tr key={ri}>
                         <th className="rh">{money0(sens.rehabAxis[ri])}
-                          <span className="sub">{over <= 0 ? 'estimate' : `+${money0(over)} over`}</span></th>
+                          <span className="sub">{psf(sens.rehabAxis[ri], sqft)}</span></th>
                         {row.map((v, ci) => (
                           <td key={ci} style={heatColor(v, s.minProfit, sens.min, sens.max)}
                             className={ri === baseR && ci === baseA ? 'base-cell' : ''}
@@ -743,10 +786,9 @@ export default function FlipPage() {
               <span className="k"><i className="box" />Your budget at base ARV</span>
             </div>
             <p className="footnote">
-              Rehab runs from spending exactly your {money0(s.rehabEst)} estimate down to burning twice the
-              {' '}{money0(s.rehabBuffer)} buffer, so the budget you are underwriting sits in the middle row.
-              Purchase price ({money0(s.price)}), timeline ({rBase.holdMonths.toFixed(1)} months), financing and
-              the {s.taxPct}% tax rate are held fixed.
+              Axes span your low-to-high ARV and rehab scenarios with 10% headroom past each end.
+              Purchase price ({money0(s.price)}), timeline ({Math.round(rBase.holdMonths * 30.4375)} days),
+              financing and the {s.taxPct}% tax rate are held fixed.
               {city && city.tiers.length > 1 && ' This city has a transfer tax cliff, so expect a step wherever the ARV range crosses it.'}
             </p>
           </div>

@@ -54,7 +54,7 @@ export function buildFlipReport(s: FlipState): string {
       <td>ARV — base</td><td class="r">${money0(s.arv.base)}</td></tr>
   <tr><td>Purchase $/sqft</td><td class="r">${money0(r.pricePsf)}</td>
       <td>ARV $/sqft</td><td class="r">${money0(r.arvPsf)}</td></tr>
-  <tr><td>Rehab — ${money0(r.rehabEst)} est + ${money0(r.rehabBuffer)} buffer</td><td class="r">${money0(r.rehabTotal)}</td>
+  <tr><td>Rehab — base</td><td class="r">${money0(r.rehabTotal)}</td>
       <td>Gross spread</td><td class="r">${pct(r.grossSpread)}</td></tr>
   <tr><td>Hold period</td><td class="r">${r.holdMonths.toFixed(1)} mo</td>
       <td>Max allowable offer</td><td class="r">${money0(mao)}</td></tr>

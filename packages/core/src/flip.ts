@@ -30,7 +30,7 @@ const DAYS_PER_MONTH = 30.4375;
 
 export type ScenarioKey = 'low' | 'base' | 'high';
 export const SCENARIO_KEYS: ScenarioKey[] = ['low', 'base', 'high'];
-export type FinanceMode = 'hard' | 'conv';
+export type FinanceMode = 'hard' | 'conv' | 'cash';
 
 export interface Triple { low: number; base: number; high: number; }
 
@@ -68,8 +68,6 @@ export const ACQ_ITEMS: LineDef[] = [
     note: '$700\u20131,100, lender-required and buyer-paid. $0 all cash.' },
   { id: 'miscAcq', label: 'Wire, notary, courier, misc', val: 250,
     note: 'Small fixed escrow charges.' },
-  { id: 'buyComm', label: 'Buy-side commission', val: 0,
-    note: '$0 representing yourself. Your own side is income, not a cost.' },
 ];
 
 /** Holding costs, all $/month over the hold period. */
@@ -124,18 +122,13 @@ export interface FlipState {
   arv: Triple;
 
   rehabSource: 'manual' | 'checklist';
-  /* One estimate plus a dollar buffer, rather than three scenarios. The budget
-     the model spends is est + buffer; the buffer is also what sets the width of
-     the rehab axis on the sensitivity grid, so the number you pick for headroom
-     is the same number the grid stress-tests you against. */
-  rehabEst: number;
-  rehabBuffer: number;
+  rehab: Triple;
 
-  /* timeline — three phases plus an overrun you can dial in */
-  rehabMonths: number;
+  /* timeline — every phase in days, because that is how they are quoted */
+  rehabDays: number;
   domDays: number;
   escrowDays: number;
-  overrunMonths: number;
+  overrunDays: number;
 
   acq: Record<string, number>;
 
@@ -147,7 +140,9 @@ export interface FlipState {
 
   sell: Record<string, number>;
   listCommPct: number;
-  buyCommPct: number;
+  buyerCommPct: number;
+  /** what you pay a buyer's agent when you acquire */
+  buySideCommPct: number;
   concessionsPct: number;
   stagingMo: number;
   retrofit: number;
@@ -203,13 +198,12 @@ export function defaultFlipState(): FlipState {
     arv: { low: 1200000, base: 1275000, high: 1340000 },
 
     rehabSource: 'manual',
-    rehabEst: 220000,
-    rehabBuffer: 40000,
+    rehab: { low: 180000, base: 220000, high: 285000 },
 
-    rehabMonths: 5,
+    rehabDays: 150,
     domDays: 21,
     escrowDays: 30,
-    overrunMonths: 0,
+    overrunDays: 0,
 
     acq: seed(ACQ_ITEMS),
 
@@ -221,7 +215,8 @@ export function defaultFlipState(): FlipState {
 
     sell: seed(SELL_FLAT_ITEMS),
     listCommPct: 2.5,
-    buyCommPct: 2.5,
+    buyerCommPct: 2.5,
+    buySideCommPct: 2.5,
     concessionsPct: 0.5,
     stagingMo: 1200,
     retrofit: 3250,
@@ -259,6 +254,9 @@ export function defaultFlipState(): FlipState {
 /* --------------------------------------------------------------- the result */
 
 export interface CostLine {
+  /** stable key so the UI can show a computed amount on its own input row
+      rather than repeating the label in a derived block below */
+  id?: string;
   label: string;
   amount: number;
   hint?: string;
@@ -273,8 +271,6 @@ export interface CostLine {
 
 export interface FlipResult {
   sale: number;
-  rehabEst: number;
-  rehabBuffer: number;
   rehabTotal: number;
 
   rehabPeriod: number;
@@ -328,20 +324,18 @@ export interface FlipResult {
 /* ------------------------------------------------------------------ compute */
 
 export function computeFlip(
-  s: FlipState, arvKey: ScenarioKey = 'base',
-  rehabOverride?: number, priceOverride?: number,
+  s: FlipState, arvKey: ScenarioKey = 'base', rehabKey: ScenarioKey = 'base',
+  priceOverride?: number, rehabOverride?: number,
 ): FlipResult {
   const city = findCity(s.citySlug);
   const price = priceOverride ?? s.price;
   const sale = s.arv[arvKey] || 0;
 
-  const rehabEst = s.rehabEst || 0;
-  const rehabBuffer = s.rehabBuffer || 0;
-  /* the sensitivity grid probes a rehab number directly; everything else
-     spends the budget, which is the estimate plus its buffer */
-  const rehabTotal = rehabOverride ?? (rehabEst + rehabBuffer);
+  /* the sensitivity grid probes a rehab number directly; everything else takes
+     the scenario it was asked for */
+  const rehabTotal = rehabOverride ?? (s.rehab[rehabKey] || 0);
 
-  const rehabPeriod = Math.max(0, s.rehabMonths + s.overrunMonths);
+  const rehabPeriod = Math.max(0, (s.rehabDays + s.overrunDays) / DAYS_PER_MONTH);
   const marketMonths = Math.max(0, (s.domDays + s.escrowDays) / DAYS_PER_MONTH);
   const holdMonths = rehabPeriod + marketMonths;
 
@@ -355,8 +349,10 @@ export function computeFlip(
   const acqLines: CostLine[] = ACQ_ITEMS.map(i => ({
     label: i.label, amount: s.acq[i.id] ?? 0, hint: i.hint,
   }));
-  if (buyCityTax > 0) acqLines.push({ label: 'City transfer tax — buy-side share', amount: buyCityTax, derived: true });
-  if (buyCountyTax > 0) acqLines.push({ label: 'County transfer tax — buy-side share', amount: buyCountyTax, derived: true });
+  const buySideComm = price * (s.buySideCommPct / 100);
+  if (buySideComm > 0) acqLines.push({ id: 'buySideComm', label: `Buy-side commission — ${s.buySideCommPct}%`, amount: buySideComm, derived: true });
+  if (buyCityTax > 0) acqLines.push({ id: 'buyCityTax', label: 'City transfer tax — buy-side share', amount: buyCityTax, derived: true });
+  if (buyCountyTax > 0) acqLines.push({ id: 'buyCountyTax', label: 'County transfer tax — buy-side share', amount: buyCountyTax, derived: true });
   const acqTotal = acqLines.reduce((a, l) => a + l.amount, 0);
 
   /* ---------- holding ----------
@@ -376,14 +372,14 @@ export function computeFlip(
     : s.builderRisk * holdMonths;
 
   const holdLines: CostLine[] = [
-    { label: 'Property tax — reassessed at purchase price', amount: propertyTax,
+    { id: 'propertyTax', label: 'Property tax — reassessed at purchase price', amount: propertyTax,
       hint: supplementalTax > 0 ? 'Includes the supplemental bill below' : undefined },
     ...(supplementalTax > 0
-      ? [{ label: 'of which supplemental bill', amount: supplementalTax, disclosure: true,
+      ? [{ id: 'supplemental', label: 'of which supplemental bill', amount: supplementalTax, disclosure: true,
            hint: 'The separate bill for the gap between the seller’s roll value and yours' }]
       : []),
-    { label: "Builder's risk insurance", amount: builderRiskTotal },
-    ...HOLD_ITEMS.map(i => ({ label: i.label, amount: (s.hold[i.id] ?? 0) * holdMonths, hint: i.hint })),
+    { id: 'builderRisk', label: "Builder's risk insurance", amount: builderRiskTotal },
+    ...HOLD_ITEMS.map(i => ({ id: i.id, label: i.label, amount: (s.hold[i.id] ?? 0) * holdMonths, hint: i.hint })),
   ];
   /* the supplemental row is disclosure inside the property-tax figure, so it is
      shown but never added again */
@@ -394,19 +390,19 @@ export function computeFlip(
   const sellCityTax = cityTransferTax(city, sale) * sellShare;
   const sellCountyTax = countyTransferTax(sale) * sellShare;
   const listComm = sale * (s.listCommPct / 100);
-  const buyerComm = sale * (s.buyCommPct / 100);
+  const buyerComm = sale * (s.buyerCommPct / 100);
   const concessions = sale * (s.concessionsPct / 100);
   const stagingHold = s.stagingMo * marketMonths;
 
   const sellLines: CostLine[] = [
-    { label: `Listing commission — ${s.listCommPct}%`, amount: listComm, derived: true },
-    { label: `Buyer agent commission — ${s.buyCommPct}%`, amount: buyerComm, derived: true },
-    { label: 'City transfer tax — sell-side share', amount: sellCityTax, derived: true },
-    { label: 'County transfer tax — sell-side share', amount: sellCountyTax, derived: true },
-    ...SELL_FLAT_ITEMS.map(i => ({ label: i.label, amount: s.sell[i.id] ?? 0 })),
-    { label: `Staging — ${money0(s.stagingMo)}/mo over DOM + escrow`, amount: stagingHold, derived: true },
-    { label: 'Retrofit compliance', amount: s.retrofit },
-    { label: `Seller concessions — ${s.concessionsPct}%`, amount: concessions, derived: true },
+    { id: 'listComm', label: `Listing commission — ${s.listCommPct}%`, amount: listComm, derived: true },
+    { id: 'buyerComm', label: `Buyer agent commission — ${s.buyerCommPct}%`, amount: buyerComm, derived: true },
+    { id: 'sellCityTax', label: 'City transfer tax — sell-side share', amount: sellCityTax, derived: true },
+    { id: 'sellCountyTax', label: 'County transfer tax — sell-side share', amount: sellCountyTax, derived: true },
+    ...SELL_FLAT_ITEMS.map(i => ({ id: i.id, label: i.label, amount: s.sell[i.id] ?? 0 })),
+    { id: 'stagingHold', label: `Staging — ${money0(s.stagingMo)}/mo over DOM + escrow`, amount: stagingHold, derived: true },
+    { id: 'retrofit', label: 'Retrofit compliance', amount: s.retrofit },
+    { id: 'concessions', label: `Seller concessions — ${s.concessionsPct}%`, amount: concessions, derived: true },
   ];
   const sellTotal = sellLines.reduce((a, l) => a + l.amount, 0);
 
@@ -436,17 +432,23 @@ export function computeFlip(
     const floor = loanAtClose * (s.hardRate / 100) * (s.minInterestMonths / 12);
     interest = Math.max(rawInterest, floor);
     const drawFees = s.drawCount * s.drawFee;
-    const extension = s.overrunMonths > 0 ? commitment * (s.extensionFeePct / 100) : 0;
+    const extension = s.overrunDays > 0 ? commitment * (s.extensionFeePct / 100) : 0;
 
     const purchaseInterest = loanAtClose * (s.hardRate / 100) * (holdMonths / 12);
     finLines.push(
-      { label: `Origination — ${s.pointsPct} points on commitment`, amount: points, phase: 'close', derived: true },
-      { label: 'Lender fees', amount: s.hardFees, phase: 'close', derived: true },
-      { label: 'Interest — purchase loan', amount: purchaseInterest, phase: 'hold', derived: true },
-      { label: 'Interest — rehab draws', amount: interest - purchaseInterest, phase: 'hold', derived: true },
-      { label: `Draw fees — ${s.drawCount} draws`, amount: drawFees, phase: 'hold', derived: true },
+      { id: 'points', label: `Origination — ${s.pointsPct} points on commitment`, amount: points, phase: 'close', derived: true },
+      { id: 'lenderFees', label: 'Lender fees', amount: s.hardFees, phase: 'close', derived: true },
+      { id: 'interestPurchase', label: 'Interest — purchase loan', amount: purchaseInterest, phase: 'hold', derived: true },
+      { id: 'interestRehab', label: 'Interest — rehab draws', amount: interest - purchaseInterest, phase: 'hold', derived: true },
+      { id: 'drawFees', label: `Draw fees — ${s.drawCount} draws`, amount: drawFees, phase: 'hold', derived: true },
     );
-    if (extension > 0) finLines.push({ label: 'Extension fee', amount: extension, phase: 'hold', derived: true });
+    if (extension > 0) finLines.push({ id: 'extension', label: 'Extension fee', amount: extension, phase: 'hold', derived: true });
+  } else if (s.finMode === 'cash') {
+    /* All cash: no loan, no lender, no interest. Every dollar is yours, which
+       is why peak cash and profit converge in this mode. */
+    loanAtClose = 0; peakLoan = 0; payoffAtSale = 0;
+    downPayment = price;
+    cashForRehab = rehabTotal;
   } else {
     loanAtClose = price * (s.ltvPct / 100);
     downPayment = price - loanAtClose;
@@ -474,12 +476,12 @@ export function computeFlip(
     const prepay = payoffAtSale * (s.prepayPct / 100);
 
     finLines.push(
-      { label: `Origination — ${s.originationPct}%`, amount: origination, phase: 'close', derived: true },
-      { label: 'Lender fees', amount: s.convFees, phase: 'close', derived: true },
-      { label: s.convIO ? 'Interest — interest-only' : 'Interest portion of payments', amount: interest, phase: 'hold', derived: true,
+      { id: 'origination', label: `Origination — ${s.originationPct}%`, amount: origination, phase: 'close', derived: true },
+      { id: 'lenderFees', label: 'Lender fees', amount: s.convFees, phase: 'close', derived: true },
+      { id: 'interest', label: s.convIO ? 'Interest — interest-only' : 'Interest portion of payments', amount: interest, phase: 'hold', derived: true,
         hint: s.convIO ? undefined : 'Principal is a balance transfer, not an expense — it is not in this figure' },
     );
-    if (prepay > 0) finLines.push({ label: 'Prepayment penalty', amount: prepay, phase: 'hold', derived: true });
+    if (prepay > 0) finLines.push({ id: 'prepay', label: 'Prepayment penalty', amount: prepay, phase: 'hold', derived: true });
   }
   const finTotal = finLines.reduce((a, l) => a + l.amount, 0);
 
@@ -507,7 +509,7 @@ export function computeFlip(
 
   const sqft = s.prop.sqft || 0;
   return {
-    sale, rehabEst, rehabBuffer, rehabTotal,
+    sale, rehabTotal,
     rehabPeriod, marketMonths, holdMonths,
     acqLines, acqTotal,
     holdLines, holdTotal, holdMonthly, propertyTax, supplementalTax,
@@ -535,7 +537,7 @@ export function computeFlip(
 export function solveMAO(s: FlipState): number {
   const target = s.minProfit;
   const profitAt = (p: number) => {
-    const r = computeFlip(s, 'base', undefined, p);
+    const r = computeFlip(s, 'base', 'base', p);
     return (s.minProfitBasis === 'pre' ? r.preTaxProfit : r.netProfit) - target;
   };
   let lo = 0, hi = Math.max(s.arv.base, 1);
@@ -550,7 +552,7 @@ export function solveMAO(s: FlipState): number {
 
 /** The 70% rule, as a cross-check rather than a verdict. */
 export function seventyRule(s: FlipState): number {
-  return 0.70 * s.arv.base - (s.rehabEst + s.rehabBuffer);
+  return 0.70 * s.arv.base - s.rehab.base;
 }
 
 /* --------------------------------------------------------------- sensitivity */
@@ -577,26 +579,18 @@ function axis(t: Triple, n: number): number[] {
   return Array.from({ length: n }, (_, i) => from + step * i);
 }
 
-/** The rehab axis runs from spending exactly your estimate to burning twice
-    your buffer, which puts the budget you are actually underwriting — estimate
-    plus buffer — dead centre. Coming in under estimate is not a case worth
-    reserving grid space for. */
 export function buildSensitivity(s: FlipState, n = 7): Sensitivity {
-  const est = s.rehabEst || 0;
-  const buffer = s.rehabBuffer || Math.abs(est) * 0.1 || 1;
-  const step = (2 * buffer) / (n - 1);
-  const rehabAxis = Array.from({ length: n }, (_, i) => est + step * i);
   const arvAxis = axis(s.arv, n);
-
+  const rehabAxis = axis(s.rehab, n);
   let min = Infinity, max = -Infinity;
   const cells = rehabAxis.map(rehab => arvAxis.map(arv => {
     const probe: FlipState = { ...s, arv: { low: arv, base: arv, high: arv } };
-    const v = computeFlip(probe, 'base', rehab).netProfit;
+    const v = computeFlip(probe, 'base', 'base', undefined, rehab).netProfit;
     if (v < min) min = v;
     if (v > max) max = v;
     return v;
   }));
-  return { arvAxis, rehabAxis, cells, min, max, baseArv: s.arv.base, baseRehab: est + buffer };
+  return { arvAxis, rehabAxis, cells, min, max, baseArv: s.arv.base, baseRehab: s.rehab.base };
 }
 
 /* ------------------------------------------------------------------ verdicts */
