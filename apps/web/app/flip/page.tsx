@@ -1,7 +1,9 @@
 'use client';
 
-/* Bay Area Flip Analyzer — four tabs over one FlipState.
+/* Bay Area Flip Analyzer — four tabs over one FlipState, laid out as sheets.
 
+   The reading task here is scanning columns of figures, not filling in a form,
+   so every group is a dense ruled table rather than a stack of airy input rows.
    Tab 1 is the only one you type into; tabs 2 and 3 are pure derivations of it.
    Tab 4 writes back into the rehab block on request and flags divergence when
    you later override it by hand.
@@ -17,11 +19,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   defaultFlipState, computeFlip, computeGrid, solveMAO, seventyRule, buildSensitivity,
   verdictFor, SCENARIO_KEYS, ACQ_ITEMS, HOLD_ITEMS, SELL_FLAT_ITEMS,
-  CATALOG, ITEM_BY_ID, computeChecklist, seededQty, citiesByCounty, findCity,
-  money, money0, pct, parseNum,
+  CATALOG, computeChecklist, seededQty, citiesByCounty, findCity,
+  money, money0, pct,
   type FlipState, type ScenarioKey, type CostLine, type QtyContext, type CatalogItem,
+  type FlipResult,
 } from '@reit/core';
-import { Card, NumInput, Switch, UnitToggle, Tile, loadJSON, saveJSON, openReportWindow } from '../../components/ui';
+import { NumInput, Switch, UnitToggle, loadJSON, saveJSON, openReportWindow } from '../../components/ui';
 import { buildFlipReport, buildScopeOfWork } from '../../components/flipReport';
 import { AddressInput } from '../../components/AddressInput';
 import { toast } from '../../components/toast';
@@ -72,72 +75,55 @@ function heatColor(v: number, min: number, max: number) {
 
 const compact = (n: number) => {
   const a = Math.abs(n);
-  const s = a >= 1000 ? `$${(a / 1000).toFixed(a >= 100000 ? 0 : 1)}k` : `$${Math.round(a)}`;
-  return n < 0 ? `(${s})` : s;
+  const t = a >= 1000 ? `$${(a / 1000).toFixed(a >= 100000 ? 0 : 1)}k` : `$${Math.round(a)}`;
+  return n < 0 ? `(${t})` : t;
 };
+/** Accounting style: a cost reads in parentheses, the way it does on paper. */
+const paren = (n: number) => n === 0 ? '—' : `(${money0(n)})`;
+const psf = (v: number, sqft: number) => sqft > 0 ? `${money0(v / sqft)}/sf` : '';
 
-/* ---------------------------------------------------------- small components */
+/* ---------------------------------------------------- sheet row primitives */
 
-/** A total and its $/sqft, each derived from the other. Type in whichever unit
-    you actually think in — comps come in $/sqft, offers go out in dollars. */
-function PsfRow({ label, value, sqft, onChange, hint }: {
-  label: string; value: number; sqft: number; onChange: (n: number) => void; hint?: string;
+const Band = ({ children, tag, span = 3 }: { children: React.ReactNode; tag?: string; span?: number }) => (
+  <tr className="band"><td colSpan={span}>{children}{tag && <span className="tag">{tag}</span>}</td></tr>
+);
+const Sec = ({ children, span = 3 }: { children: React.ReactNode; span?: number }) => (
+  <tr className="sec"><td colSpan={span}>{children}</td></tr>
+);
+
+/** An editable row: label, the input, then a static unit or derived figure. */
+function R({ label, hint, unit, children, ctl }: {
+  label: React.ReactNode; hint?: string; unit?: React.ReactNode;
+  children?: React.ReactNode; ctl?: React.ReactNode;
 }) {
   return (
-    <div className="psf-row">
-      <label>{label}{hint && <span className="sub">{hint}</span>}</label>
-      <NumInput value={value} onChange={onChange} />
-      <div className="psf">
-        <NumInput fmt="raw" value={sqft > 0 ? Math.round(value / sqft) : 0}
-          onChange={v => sqft > 0 && onChange(Math.round(v * sqft))} />
-      </div>
-    </div>
+    <tr>
+      <td className="lb">{label}{hint && <span className="sub">{hint}</span>}</td>
+      {ctl ? <td className="ctl" colSpan={2}>{ctl}</td> : <>
+        <td className="n">{children}</td>
+        <td className="u">{unit}</td>
+      </>}
+    </tr>
   );
 }
 
-/** The computed side of a cost group. Lines that would only repeat an input
-    field verbatim are skipped — showing them twice makes a card twice as long
-    and tells you nothing new. */
-function CostList({ lines, total, label = 'Total', derivedOnly = false }: {
-  lines: CostLine[]; total: number; label?: string; derivedOnly?: boolean;
+/** A read-only computed row. */
+function V({ label, hint, value, unit, cls }: {
+  label: React.ReactNode; hint?: string; value: React.ReactNode; unit?: React.ReactNode; cls?: string;
 }) {
   return (
-    <div className="cost-list">
-      {lines.filter(l => l.amount !== 0 && (!derivedOnly || l.derived || l.disclosure)).map((l, i) => (
-        <div className={`cost-line${l.disclosure ? ' disclosure' : ''}`} key={i} title={l.hint}>
-          <span className="cl-l">{l.label}</span>
-          <span className="cl-v">{money0(l.amount)}</span>
-        </div>
-      ))}
-      <div className="cost-line total"><span className="cl-l">{label}</span><span className="cl-v">{money0(total)}</span></div>
-    </div>
+    <tr className={cls}>
+      <td className="lb">{label}{hint && <span className="sub">{hint}</span>}</td>
+      <td className="n">{value}</td>
+      <td className="u">{unit}</td>
+    </tr>
   );
 }
 
-function MoneyRow({ label, value, onChange, hint }: {
-  label: string; value: number; onChange: (n: number) => void; hint?: string;
-}) {
-  return (
-    <div className="row">
-      <label>{label}{hint && <span className="sub">{hint}</span>}</label>
-      <NumInput value={value} onChange={onChange} />
-    </div>
-  );
-}
-
-function PctRow({ label, value, onChange, hint }: {
-  label: string; value: number; onChange: (n: number) => void; hint?: string;
-}) {
-  return (
-    <div className="row">
-      <label>{label}{hint && <span className="sub">{hint}</span>}</label>
-      <div className="inline-input">
-        <NumInput fmt="raw" small value={value} onChange={onChange} />
-        <span className="unit-suffix">%</span>
-      </div>
-    </div>
-  );
-}
+const Money = ({ value, onChange }: { value: number; onChange: (n: number) => void }) =>
+  <NumInput value={value} onChange={onChange} />;
+const Num = ({ value, onChange }: { value: number; onChange: (n: number) => void }) =>
+  <NumInput fmt="raw" value={value} onChange={onChange} />;
 
 /* ================================================================== the page */
 
@@ -207,6 +193,7 @@ export default function FlipPage() {
 
   /* ---------- derived ---------- */
   const city = findCity(s.citySlug);
+  const sqft = s.prop.sqft;
   const ctx: QtyContext = useMemo(() => ({
     sqft: s.prop.sqft, beds: s.prop.beds, baths: s.prop.baths,
     halfBaths: s.prop.halfBaths, stories: s.prop.stories, garageBays: s.prop.garageBays,
@@ -216,14 +203,15 @@ export default function FlipPage() {
     () => computeChecklist(s.checked, s.qty, catalogPrices, ctx),
     [s.checked, s.qty, catalogPrices, ctx]);
 
-  const r = useMemo(() => computeFlip(s, sel.a, sel.r), [s, sel]);
   const rBase = useMemo(() => computeFlip(s, 'base', 'base'), [s]);
+  /* the P&L shows all three rehab scenarios side by side at the selected ARV */
+  const cols = useMemo(() => SCENARIO_KEYS.map(rk => computeFlip(s, sel.a, rk)), [s, sel.a]);
   const grid = useMemo(() => computeGrid(s), [s]);
   const sens = useMemo(() => buildSensitivity(s, 7), [s]);
   const mao = useMemo(() => solveMAO(s), [s]);
   const verdict = verdictFor(rBase, s);
+  const selIdx = SCENARIO_KEYS.indexOf(sel.r);
 
-  /* the checklist and the rehab inputs can drift once you hand-edit tab 1 */
   const diverged = s.rehabSource === 'checklist' && checklist.checkedCount > 0 &&
     (Math.abs(checklist.base - s.rehab.base) > 1 ||
      Math.abs(checklist.low - s.rehab.low) > 1 ||
@@ -286,6 +274,48 @@ export default function FlipPage() {
     catalogPrices[`${i.id}.${k}`] !== undefined ? catalogPrices[`${i.id}.${k}`] : i[k];
   const qtyOf = (i: CatalogItem) => s.qty[i.id] !== undefined ? s.qty[i.id] : seededQty(i, ctx);
 
+  /* one P&L row across the three scenario columns */
+  const PL = ({ label, pick, fmt = paren, cls, hint }: {
+    label: React.ReactNode; pick: (r: FlipResult) => number;
+    fmt?: (n: number) => string; cls?: string; hint?: string;
+  }) => (
+    <tr className={cls}>
+      <td className="lb">{label}{hint && <span className="sub">{hint}</span>}</td>
+      {cols.map((c, i) => (
+        <td key={i} className={`n${i === selIdx ? ' on' : ''}${fmt === paren && pick(c) !== 0 ? ' neg' : ''}`}>
+          {fmt(pick(c))}
+        </td>
+      ))}
+    </tr>
+  );
+
+  /* an expandable cost group — detail rows come from the selected column */
+  const Fold = ({ id, label, pick, lines }: {
+    id: string; label: string; pick: (r: FlipResult) => number; lines: CostLine[];
+  }) => {
+    const open = !!expanded[id];
+    return (
+      <>
+        <tr>
+          <td className="lb">
+            <button className="exp" onClick={() => setExpanded(p => ({ ...p, [id]: !p[id] }))}>
+              {open ? '▾' : '▸'}
+            </button>{label}
+          </td>
+          {cols.map((c, i) => (
+            <td key={i} className={`n neg${i === selIdx ? ' on' : ''}`}>{paren(pick(c))}</td>
+          ))}
+        </tr>
+        {open && lines.filter(l => l.amount !== 0).map((l, i) => (
+          <tr className="detail" key={i}>
+            <td className="lb">{l.label}</td>
+            <td className="n" colSpan={3}>{money0(l.amount)}</td>
+          </tr>
+        ))}
+      </>
+    );
+  };
+
   /* ================================================================= render */
   return (
     <>
@@ -324,39 +354,20 @@ export default function FlipPage() {
           </div>
         </div>
 
-        <div className="prop-line">
-          {([['beds', 'Beds'], ['baths', 'Baths'], ['halfBaths', 'Half ba'], ['sqft', 'Sq ft'], ['stories', 'Stories'], ['garageBays', 'Garage']] as const).map(([k, label]) => (
-            <div className="pf-item" key={k}><label>{label}</label>
-              <NumInput fmt={k === 'sqft' ? 'money' : 'raw'} small value={s.prop[k]} onChange={v => setProp(k, v)} /></div>
-          ))}
-          <div className="pf-item"><label>Year built</label>
-            <input className="num small" value={s.prop.year} autoComplete="off"
-              onChange={ev => setProp('year', ev.target.value)} /></div>
-          <div className="pf-item grow"><label>City — sets transfer tax &amp; property tax</label>
-            <select className="sel-city" value={s.citySlug} onChange={ev => applyCity(ev.target.value)}>
-              <option value="">Not listed — enter rates manually</option>
-              {citiesByCounty().map(g => (
-                <optgroup key={g.county} label={`${g.county} County`}>
-                  {g.cities.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-        </div>
-
         <div className="prop-chips">
           <span className="p-chip">Gross spread <b>{pct(rBase.grossSpread)}</b></span>
           <span className="p-chip">ARV <b>{money0(rBase.arvPsf)}/sf</b></span>
           <span className="p-chip">Purchase <b>{money0(rBase.pricePsf)}/sf</b></span>
           <span className="p-chip">Rehab <b>{money0(rBase.rehabPsf)}/sf</b></span>
           <span className="p-chip">Hold <b>{rBase.holdMonths.toFixed(1)} mo</b></span>
+          <span className="p-chip">Peak cash <b>{money0(rBase.peakCash)}</b></span>
         </div>
       </div>
 
       <nav className="tabs">
         <button className={`tab${tab === 'assumptions' ? ' on' : ''}`} onClick={() => setTab('assumptions')}>Assumptions</button>
         <button className={`tab${tab === 'model' ? ' on' : ''}`} onClick={() => setTab('model')}>
-          Financial Model <span className="badge">{compact(rBase.netProfit)}</span></button>
+          Deal Model <span className="badge">{compact(rBase.netProfit)}</span></button>
         <button className={`tab${tab === 'sensitivity' ? ' on' : ''}`} onClick={() => setTab('sensitivity')}>Sensitivity</button>
         <button className={`tab${tab === 'checklist' ? ' on' : ''}`} onClick={() => setTab('checklist')}>
           Cost Checklist <span className="badge">{checklist.checkedCount || '0'}</span></button>
@@ -364,237 +375,279 @@ export default function FlipPage() {
 
       {/* ============================================ TAB 1 — ASSUMPTIONS */}
       <section className={`pane${tab === 'assumptions' ? ' on' : ''}`}>
-        {city?.note && (
-          <div className="notice warn">
-            <div><b>{city.name}</b>{city.note}</div>
-          </div>
-        )}
+        {city?.note && <div className="notice warn"><div><b>{city.name}</b>{city.note}</div></div>}
+
         <div className="flip-cols">
           <div>
-            <Card dense title="Purchase & ARV" tag="two-way $/sqft">
-              <MoneyRow label="Purchase price" value={s.price} onChange={v => set('price', v)} />
-              <div className="psf-head"><span>After-repair value</span><span>Total</span><span>Per sqft</span></div>
+            <div className="sheet"><table className="ss"><tbody>
+              <Band tag={`${pct(rBase.grossSpread)} gross spread`}>Property &amp; deal</Band>
+              <R label="City" hint="sets transfer tax, property tax rate and retrofit" ctl={
+                <select className="sel-city" value={s.citySlug} onChange={ev => applyCity(ev.target.value)}>
+                  <option value="">Not listed — enter rates manually</option>
+                  {citiesByCounty().map(g => (
+                    <optgroup key={g.county} label={`${g.county} County`}>
+                      {g.cities.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+                    </optgroup>
+                  ))}
+                </select>} />
+              <R label="Square feet"><Money value={sqft} onChange={v => setProp('sqft', v)} /></R>
+              <R label="Beds / full baths / half" ctl={
+                <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
+                  <NumInput fmt="raw" small value={s.prop.beds} onChange={v => setProp('beds', v)} />
+                  <NumInput fmt="raw" small value={s.prop.baths} onChange={v => setProp('baths', v)} />
+                  <NumInput fmt="raw" small value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} />
+                </div>} />
+              <R label="Stories / garage bays" ctl={
+                <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
+                  <NumInput fmt="raw" small value={s.prop.stories} onChange={v => setProp('stories', v)} />
+                  <NumInput fmt="raw" small value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} />
+                </div>} />
+              <R label="Year built" ctl={
+                <input className="num small" value={s.prop.year} autoComplete="off"
+                  onChange={ev => setProp('year', ev.target.value)} />} />
+              <Sec>Purchase</Sec>
+              <R label="Purchase price" unit={psf(s.price, sqft)}>
+                <Money value={s.price} onChange={v => set('price', v)} /></R>
+              <Sec>After-repair value</Sec>
               {SCENARIO_KEYS.map(k => (
-                <PsfRow key={k} label={k[0].toUpperCase() + k.slice(1)} value={s.arv[k]}
-                  sqft={s.prop.sqft} onChange={v => setArv(k, v)} />
+                <R key={k} label={`ARV — ${k}`} unit={psf(s.arv[k], sqft)}>
+                  <Money value={s.arv[k]} onChange={v => setArv(k, v)} /></R>
               ))}
-              <div className="cost-line total" style={{ marginTop: 8 }}>
-                <span className="cl-l">Gross spread at base ARV</span>
-                <span className="cl-v">{money0(s.arv.base - s.price)} · {pct(rBase.grossSpread)}</span>
+              <V cls="tot" label="Gross spread at base ARV"
+                value={money0(s.arv.base - s.price)} unit={pct(rBase.grossSpread)} />
+            </tbody></table></div>
+
+            <div className="sheet"><table className="ss"><tbody>
+              <Band tag={s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}>Rehab budget</Band>
+              {SCENARIO_KEYS.map(k => (
+                <R key={k} label={`Rehab — ${k}`} unit={psf(s.rehab[k], sqft)}>
+                  <Money value={s.rehab[k]} onChange={v => setRehab(k, v)} /></R>
+              ))}
+              <R label="Contingency" hint="on top of each scenario, its own P&amp;L line" unit="%">
+                <Num value={s.contingencyPct} onChange={v => set('contingencyPct', v)} /></R>
+              <V cls="tot" label="Base rehab incl. contingency"
+                value={money0(rBase.rehabTotal)} unit={psf(rBase.rehabTotal, sqft)} />
+            </tbody></table></div>
+            {diverged && (
+              <div className="notice warn">
+                <div><b>Checklist and budget have diverged</b>
+                  Checklist says {money0(checklist.base)} base; this deal uses {money0(s.rehab.base)}.</div>
+                <div className="act">
+                  <button onClick={pushChecklist}>Re-sync</button>
+                  <button onClick={() => set('rehabSource', 'manual')}>Keep mine</button>
+                </div>
               </div>
-            </Card>
+            )}
+            {checklist.checkedCount > 0 && s.rehabSource === 'manual' && (
+              <div className="notice">
+                <div><b>{checklist.checkedCount} items checked on the checklist</b>
+                  They total {money0(checklist.base)} at base.</div>
+                <div className="act"><button onClick={pushChecklist}>Use these</button></div>
+              </div>
+            )}
 
-            <Card dense title="Rehab budget" tag={s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}>
-              {diverged && (
-                <div className="notice warn">
-                  <div><b>Checklist and budget have diverged</b>
-                    Checklist says {money0(checklist.base)} base; this deal is using {money0(s.rehab.base)}.</div>
-                  <div className="act">
-                    <button onClick={pushChecklist}>Re-sync</button>
-                    <button onClick={() => set('rehabSource', 'manual')}>Keep mine</button>
-                  </div>
-                </div>
-              )}
-              <div className="psf-head"><span>Scenario</span><span>Total</span><span>Per sqft</span></div>
-              {SCENARIO_KEYS.map(k => (
-                <PsfRow key={k} label={k[0].toUpperCase() + k.slice(1)} value={s.rehab[k]}
-                  sqft={s.prop.sqft} onChange={v => setRehab(k, v)} />
-              ))}
-              <PctRow label="Contingency" hint="applied on top of each scenario, shown as its own P&L line"
-                value={s.contingencyPct} onChange={v => set('contingencyPct', v)} />
-              {checklist.checkedCount > 0 && s.rehabSource === 'manual' && (
-                <div className="notice">
-                  <div><b>{checklist.checkedCount} items checked on the checklist</b>
-                    They total {money0(checklist.base)} at base.</div>
-                  <div className="act"><button onClick={pushChecklist}>Use these</button></div>
-                </div>
-              )}
-            </Card>
+            <div className="sheet"><table className="ss"><tbody>
+              <Band tag={`${rBase.holdMonths.toFixed(1)} mo hold`}>Timeline</Band>
+              <R label="Rehab duration" hint="fold permit and design time in here" unit="months">
+                <Num value={s.rehabMonths} onChange={v => set('rehabMonths', v)} /></R>
+              <R label="Days on market" hint="list to accepted offer" unit="days">
+                <Num value={s.domDays} onChange={v => set('domDays', v)} /></R>
+              <R label="Escrow period" hint="accepted offer to close" unit="days">
+                <Num value={s.escrowDays} onChange={v => set('escrowDays', v)} /></R>
+              <R label="Schedule overrun" hint="costs you holding AND interest" unit="months">
+                <Num value={s.overrunMonths} onChange={v => set('overrunMonths', v)} /></R>
+              <V cls="tot" label="Total hold period" value={rBase.holdMonths.toFixed(1)} unit="months" />
+            </tbody></table></div>
 
-            <Card dense title="Timeline" tag={`${rBase.holdMonths.toFixed(1)} mo hold`}>
-              <MoneyRow label="Rehab duration" hint="months — fold permit and design time in here"
-                value={s.rehabMonths} onChange={v => set('rehabMonths', v)} />
-              <MoneyRow label="Days on market" hint="list to accepted offer"
-                value={s.domDays} onChange={v => set('domDays', v)} />
-              <MoneyRow label="Escrow period" hint="accepted offer to close, in days"
-                value={s.escrowDays} onChange={v => set('escrowDays', v)} />
-              <MoneyRow label="Schedule overrun" hint="extra months — costs you holding AND interest"
-                value={s.overrunMonths} onChange={v => set('overrunMonths', v)} />
-              <div className="cost-line total"><span className="cl-l">Total hold period</span>
-                <span className="cl-v">{rBase.holdMonths.toFixed(1)} months</span></div>
-            </Card>
-
-            <Card dense title="Tax & thresholds">
-              <PctRow label="Blended tax rate" hint="flip profit is ordinary income, not capital gains"
-                value={s.taxPct} onChange={v => set('taxPct', v)} />
-              <div className="row"><label>A loss shelters other income
-                <span className="sub">off by default — no phantom benefit on a bad deal</span></label>
-                <Switch checked={s.lossOffsetsIncome} onChange={v => set('lossOffsetsIncome', v)} /></div>
-              <MoneyRow label="Minimum profit" hint="your walk-away floor — this is what MAO solves against"
-                value={s.minProfit} onChange={v => set('minProfit', v)} />
-              <div className="row"><label>Floor is measured</label>
+            <div className="sheet"><table className="ss"><tbody>
+              <Band>Tax &amp; thresholds</Band>
+              <R label="Blended tax rate" hint="ordinary income, not capital gains" unit="%">
+                <Num value={s.taxPct} onChange={v => set('taxPct', v)} /></R>
+              <R label="A loss shelters other income" hint="off by default — no phantom benefit" ctl={
+                <Switch checked={s.lossOffsetsIncome} onChange={v => set('lossOffsetsIncome', v)} />} />
+              <R label="Minimum profit" hint="your floor — what MAO solves against">
+                <Money value={s.minProfit} onChange={v => set('minProfit', v)} /></R>
+              <R label="Floor is measured" ctl={
                 <UnitToggle options={[{ u: 'after', label: 'after tax' }, { u: 'pre', label: 'pre-tax' }]}
-                  value={s.minProfitBasis} onChange={u => set('minProfitBasis', u as 'after' | 'pre')} /></div>
-            </Card>
+                  value={s.minProfitBasis} onChange={u => set('minProfitBasis', u as 'after' | 'pre')} />} />
+            </tbody></table></div>
           </div>
 
           <div>
-            <Card dense title="Acquisition costs" tag={money0(rBase.acqTotal)}>
+            <div className="sheet"><table className="ss"><tbody>
+              <Band tag={money0(rBase.acqTotal)}>Acquisition costs</Band>
               {ACQ_ITEMS.map(i => (
-                <MoneyRow key={i.id} label={i.label} hint={i.hint}
-                  value={s.acq[i.id] ?? 0} onChange={v => setMap('acq', i.id, v)} />
+                <R key={i.id} label={i.label} hint={i.hint}>
+                  <Money value={s.acq[i.id] ?? 0} onChange={v => setMap('acq', i.id, v)} /></R>
               ))}
-              <CostList derivedOnly lines={rBase.acqLines} total={rBase.acqTotal} />
-            </Card>
+              {rBase.acqLines.filter(l => l.derived && l.amount !== 0).map((l, i) => (
+                <V key={i} label={l.label} value={money0(l.amount)} unit="auto" />
+              ))}
+              <V cls="tot" label="Total acquisition" value={money0(rBase.acqTotal)}
+                unit={pct(s.price > 0 ? rBase.acqTotal / s.price * 100 : 0)} />
+            </tbody></table></div>
 
-            <Card dense title="Holding costs" tag={`${money0(rBase.holdMonthly)}/mo`}>
-              <PctRow label="Levied property tax rate"
-                hint="1% Prop 13 base plus local bonds — not a published “effective” rate"
-                value={s.taxRatePct} onChange={v => set('taxRatePct', v)} />
-              <MoneyRow label="Prior assessed value"
-                hint="optional — breaks out the supplemental bill you’ll get"
-                value={s.priorAssessed} onChange={v => set('priorAssessed', v)} />
-              <div className="row"><label>Builder&apos;s risk insurance</label>
-                <div className="inline-input">
+            <div className="sheet"><table className="ss"><tbody>
+              <Band tag={`${money0(rBase.holdMonthly)}/mo`}>Holding costs</Band>
+              <R label="Levied property tax rate"
+                hint="1% Prop 13 base plus local bonds — not an “effective” rate" unit="%">
+                <Num value={s.taxRatePct} onChange={v => set('taxRatePct', v)} /></R>
+              <R label="Prior assessed value" hint="optional — breaks out the supplemental bill">
+                <Money value={s.priorAssessed} onChange={v => set('priorAssessed', v)} /></R>
+              <R label="Builder&apos;s risk insurance" ctl={
+                <div className="inline-input" style={{ justifyContent: 'flex-end' }}>
                   <NumInput fmt="raw" small value={s.builderRisk} onChange={v => set('builderRisk', v)} />
                   <UnitToggle options={[{ u: '$', label: '$/mo' }, { u: '%', label: '% rehab' }]}
                     value={s.builderRiskUnit} onChange={u => set('builderRiskUnit', u as '$' | '%')} />
-                </div>
-              </div>
+                </div>} />
+              <Sec>Monthly operating — enter $/mo, total at right</Sec>
               {HOLD_ITEMS.map(i => (
-                <MoneyRow key={i.id} label={`${i.label} — $/mo`} hint={i.hint}
-                  value={s.hold[i.id] ?? 0} onChange={v => setMap('hold', i.id, v)} />
+                <R key={i.id} label={i.label} hint={i.hint} unit={money0((s.hold[i.id] ?? 0) * rBase.holdMonths)}>
+                  <Money value={s.hold[i.id] ?? 0} onChange={v => setMap('hold', i.id, v)} /></R>
               ))}
-              <CostList label={`Total over ${rBase.holdMonths.toFixed(1)} months`} total={rBase.holdTotal}
-                lines={[
-                  { label: 'Property tax — reassessed at purchase price', amount: rBase.propertyTax },
-                  ...(rBase.supplementalTax > 0
-                    ? [{ label: 'of which supplemental bill', amount: rBase.supplementalTax, disclosure: true }]
-                    : []),
-                  { label: "Builder's risk insurance",
-                    amount: rBase.holdTotal - rBase.propertyTax - rBase.holdMonthly * rBase.holdMonths },
-                  { label: `Utilities & upkeep — ${money0(rBase.holdMonthly)}/mo`,
-                    amount: rBase.holdMonthly * rBase.holdMonths },
-                ]} />
-            </Card>
+              <Sec>Over the hold period</Sec>
+              <V label="Property tax — reassessed" value={money0(rBase.propertyTax)} unit="auto" />
+              {rBase.supplementalTax > 0 &&
+                <V label="of which supplemental bill" value={money0(rBase.supplementalTax)} unit="incl." />}
+              <V label="Builder&apos;s risk"
+                value={money0(rBase.holdTotal - rBase.propertyTax - rBase.holdMonthly * rBase.holdMonths)} />
+              <V label={`Operating — ${money0(rBase.holdMonthly)}/mo`}
+                value={money0(rBase.holdMonthly * rBase.holdMonths)} />
+              <V cls="tot" label={`Total over ${rBase.holdMonths.toFixed(1)} months`} value={money0(rBase.holdTotal)} />
+            </tbody></table></div>
 
-            <Card dense title="Selling costs" tag={pct(rBase.sellPctOfSale)}>
-              <PctRow label="Listing commission" value={s.listCommPct} onChange={v => set('listCommPct', v)} />
-              <PctRow label="Buyer agent commission" hint="negotiable or zero post-settlement"
-                value={s.buyCommPct} onChange={v => set('buyCommPct', v)} />
-              <div className="row"><label>City transfer tax paid by
-                {city && <span className="sub">{city.name} custom — override per deal</span>}</label>
+            <div className="sheet"><table className="ss"><tbody>
+              <Band tag={`${pct(rBase.sellPctOfSale)} of sale`}>Selling costs</Band>
+              <R label="Listing commission" unit="%">
+                <Num value={s.listCommPct} onChange={v => set('listCommPct', v)} /></R>
+              <R label="Buyer agent commission" hint="negotiable or zero post-settlement" unit="%">
+                <Num value={s.buyCommPct} onChange={v => set('buyCommPct', v)} /></R>
+              <R label="City transfer tax paid by"
+                hint={city ? `${city.name} custom — override per deal` : undefined} ctl={
                 <UnitToggle
                   options={[{ u: 'seller', label: 'Seller' }, { u: 'split', label: 'Split' }, { u: 'buyer', label: 'Buyer' }]}
                   value={s.transferPayer}
-                  onChange={u => set('transferPayer', u as FlipState['transferPayer'])} />
-              </div>
+                  onChange={u => set('transferPayer', u as FlipState['transferPayer'])} />} />
               {SELL_FLAT_ITEMS.map(i => (
-                <MoneyRow key={i.id} label={i.label} value={s.sell[i.id] ?? 0} onChange={v => setMap('sell', i.id, v)} />
+                <R key={i.id} label={i.label}>
+                  <Money value={s.sell[i.id] ?? 0} onChange={v => setMap('sell', i.id, v)} /></R>
               ))}
-              <MoneyRow label="Staging — per month" hint="runs over DOM plus escrow"
-                value={s.stagingMo} onChange={v => set('stagingMo', v)} />
-              <MoneyRow label="Retrofit compliance"
-                hint={city ? city.retrofit.map(x => x.label).join(' · ') : 'sewer lateral, water heater strapping, alarms'}
-                value={s.retrofit} onChange={v => set('retrofit', v)} />
-              <PctRow label="Seller concessions" value={s.concessionsPct} onChange={v => set('concessionsPct', v)} />
-              <div className="row"><label>CA 3.33% withholding
-                <span className="sub">a cash-flow timing item, never an expense</span></label>
-                <Switch checked={s.withholdingOn} onChange={v => set('withholdingOn', v)} /></div>
-              <CostList derivedOnly lines={rBase.sellLines} total={rBase.sellTotal} />
-            </Card>
+              <R label="Staging — per month" hint="runs over DOM plus escrow">
+                <Money value={s.stagingMo} onChange={v => set('stagingMo', v)} /></R>
+              <R label="Retrofit compliance"
+                hint={city ? city.retrofit.map(x => x.label).join(' · ') : 'lateral, strapping, alarms'}>
+                <Money value={s.retrofit} onChange={v => set('retrofit', v)} /></R>
+              <R label="Seller concessions" unit="%">
+                <Num value={s.concessionsPct} onChange={v => set('concessionsPct', v)} /></R>
+              <R label="CA 3.33% withholding" hint="cash-flow timing, never an expense" ctl={
+                <Switch checked={s.withholdingOn} onChange={v => set('withholdingOn', v)} />} />
+              <Sec>Computed at base ARV</Sec>
+              {rBase.sellLines.filter(l => l.derived && l.amount !== 0).map((l, i) => (
+                <V key={i} label={l.label} value={money0(l.amount)} />
+              ))}
+              <V cls="tot" label="Total selling costs" value={money0(rBase.sellTotal)}
+                unit={pct(rBase.sellPctOfSale)} />
+            </tbody></table></div>
 
-            <Card dense title="Financing" tag={s.finMode === 'hard' ? 'hard money' : (s.ltvPct > 0 ? 'conventional' : 'all cash')}>
-              <div className="mode-row">
+            <div className="sheet"><table className="ss"><tbody>
+              <Band tag={s.finMode === 'hard' ? 'hard money' : (s.ltvPct > 0 ? 'conventional' : 'all cash')}>Financing</Band>
+              <R label="Instrument" ctl={
                 <UnitToggle options={[{ u: 'hard', label: 'Hard money' }, { u: 'conv', label: 'Conventional' }]}
-                  value={s.finMode} onChange={u => set('finMode', u as FlipState['finMode'])} />
+                  value={s.finMode} onChange={u => set('finMode', u as FlipState['finMode'])} />} />
+              {s.finMode === 'hard' ? <>
+                <R label="Loan-to-cost on purchase" unit="%"><Num value={s.ltcPct} onChange={v => set('ltcPct', v)} /></R>
+                <R label="Rehab financed" hint="released in draws over the rehab" unit="%">
+                  <Num value={s.rehabFinancedPct} onChange={v => set('rehabFinancedPct', v)} /></R>
+                <R label="Interest rate" unit="%"><Num value={s.hardRate} onChange={v => set('hardRate', v)} /></R>
+                <R label="Points" hint="on purchase loan plus rehab holdback" unit="%">
+                  <Num value={s.pointsPct} onChange={v => set('pointsPct', v)} /></R>
+                <R label="Lender fees"><Money value={s.hardFees} onChange={v => set('hardFees', v)} /></R>
+                <R label="Draws / fee each" ctl={
+                  <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
+                    <NumInput fmt="raw" small value={s.drawCount} onChange={v => set('drawCount', v)} />
+                    <NumInput small value={s.drawFee} onChange={v => set('drawFee', v)} />
+                  </div>} />
+                <R label="Minimum interest" unit="months">
+                  <Num value={s.minInterestMonths} onChange={v => set('minInterestMonths', v)} /></R>
+                <R label="Extension fee" hint="charged when overrun is above zero" unit="%">
+                  <Num value={s.extensionFeePct} onChange={v => set('extensionFeePct', v)} /></R>
+              </> : <>
+                <R label="Loan-to-value on purchase" hint="set to 0 for an all-cash purchase" unit="%">
+                  <Num value={s.ltvPct} onChange={v => set('ltvPct', v)} /></R>
+                <R label="Interest rate" unit="%"><Num value={s.convRate} onChange={v => set('convRate', v)} /></R>
+                <R label="Term" unit="years"><Num value={s.convTerm} onChange={v => set('convTerm', v)} /></R>
+                <R label="Interest only" ctl={<Switch checked={s.convIO} onChange={v => set('convIO', v)} />} />
+                <R label="Origination" unit="%"><Num value={s.originationPct} onChange={v => set('originationPct', v)} /></R>
+                <R label="Lender fees"><Money value={s.convFees} onChange={v => set('convFees', v)} /></R>
+                <R label="Prepayment penalty" unit="%"><Num value={s.prepayPct} onChange={v => set('prepayPct', v)} /></R>
+              </>}
+              <Sec>Computed at base case</Sec>
+              {rBase.finLines.filter(l => l.amount !== 0).map((l, i) => (
+                <V key={i} label={l.label} value={money0(l.amount)} />
+              ))}
+              <V cls="tot" label="Total financing cost" value={money0(rBase.finTotal)} />
+              <V label="Loan at close" value={money0(rBase.loanAtClose)} />
+              <V label="Down payment" value={money0(rBase.downPayment)} />
+              <V label="Cash needed for rehab" value={money0(rBase.cashForRehab)} />
+              <V cls="grand" label="Peak cash out of pocket" value={money0(rBase.peakCash)} />
+            </tbody></table></div>
+            {s.finMode === 'conv' && (
+              <div className="notice">
+                <div><b>Rehab is unfinanced in this mode</b>
+                  A conventional purchase loan funds no rehab, so the whole {money0(rBase.rehabTotal)} budget is
+                  cash. Principal repaid during the hold is a balance transfer, not an expense — it raises peak
+                  cash and returns as a smaller payoff.</div>
               </div>
-              {s.finMode === 'hard' ? (
-                <>
-                  <PctRow label="Loan-to-cost on purchase" value={s.ltcPct} onChange={v => set('ltcPct', v)} />
-                  <PctRow label="Rehab financed" hint="released in draws over the rehab"
-                    value={s.rehabFinancedPct} onChange={v => set('rehabFinancedPct', v)} />
-                  <PctRow label="Interest rate" value={s.hardRate} onChange={v => set('hardRate', v)} />
-                  <PctRow label="Points" hint="charged on purchase loan plus rehab holdback"
-                    value={s.pointsPct} onChange={v => set('pointsPct', v)} />
-                  <MoneyRow label="Lender fees" value={s.hardFees} onChange={v => set('hardFees', v)} />
-                  <MoneyRow label="Number of draws" value={s.drawCount} onChange={v => set('drawCount', v)} />
-                  <MoneyRow label="Fee per draw" value={s.drawFee} onChange={v => set('drawFee', v)} />
-                  <MoneyRow label="Minimum interest months" value={s.minInterestMonths} onChange={v => set('minInterestMonths', v)} />
-                  <PctRow label="Extension fee" hint="charged when schedule overrun is above zero"
-                    value={s.extensionFeePct} onChange={v => set('extensionFeePct', v)} />
-                </>
-              ) : (
-                <>
-                  <PctRow label="Loan-to-value on purchase" hint="set to 0 to model an all-cash purchase"
-                    value={s.ltvPct} onChange={v => set('ltvPct', v)} />
-                  <PctRow label="Interest rate" value={s.convRate} onChange={v => set('convRate', v)} />
-                  <MoneyRow label="Term — years" value={s.convTerm} onChange={v => set('convTerm', v)} />
-                  <div className="row"><label>Interest only</label>
-                    <Switch checked={s.convIO} onChange={v => set('convIO', v)} /></div>
-                  <PctRow label="Origination" value={s.originationPct} onChange={v => set('originationPct', v)} />
-                  <MoneyRow label="Lender fees" value={s.convFees} onChange={v => set('convFees', v)} />
-                  <PctRow label="Prepayment penalty" value={s.prepayPct} onChange={v => set('prepayPct', v)} />
-                  <div className="notice">
-                    <div><b>Rehab is unfinanced in this mode</b>
-                      A conventional purchase loan funds no rehab, so the whole {money0(rBase.rehabTotal)} budget
-                      is cash. Principal you repay during the hold is a balance transfer, not an expense — it
-                      raises peak cash and comes back as a smaller payoff.</div>
-                  </div>
-                </>
-              )}
-              <CostList lines={rBase.finLines} total={rBase.finTotal} />
-              <div className="cost-line"><span className="cl-l">Loan at close</span><span className="cl-v">{money0(rBase.loanAtClose)}</span></div>
-              <div className="cost-line"><span className="cl-l">Down payment</span><span className="cl-v">{money0(rBase.downPayment)}</span></div>
-              <div className="cost-line"><span className="cl-l">Cash needed for rehab</span><span className="cl-v">{money0(rBase.cashForRehab)}</span></div>
-              <div className="cost-line total"><span className="cl-l">Peak cash out of pocket</span><span className="cl-v">{money0(rBase.peakCash)}</span></div>
-            </Card>
+            )}
           </div>
         </div>
       </section>
 
-      {/* ============================================ TAB 2 — MODEL */}
+      {/* ============================================ TAB 2 — DEAL MODEL */}
       <section className={`pane${tab === 'model' ? ' on' : ''}`}>
         <div className={`verdict ${verdict.v}`}>
           <span className="dot" />
           <div><div className="v-title">{verdict.title}</div><div className="v-sub">{verdict.sub}</div></div>
         </div>
 
-        <div className="tiles" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-          <Tile hero label="Net profit" value={money(rBase.netProfit)}
-            negative={rBase.netProfit < 0} note={`after ${s.taxPct}% tax`} />
-          <Tile label="ROI on cash" value={pct(rBase.roi)} note={`${money0(rBase.peakCash)} invested`} />
-          <Tile label="Annualized ROI" value={pct(rBase.annualizedRoi)} note={`${rBase.holdMonths.toFixed(1)}-month hold`} />
-          <Tile label="Margin % of ARV" value={pct(rBase.marginPreTax)} note={`pre-tax · ${pct(rBase.marginAfterTax)} after`} />
-          <Tile label="Max offer" value={money0(mao)} note={`for ${money0(s.minProfit)} ${s.minProfitBasis === 'pre' ? 'pre-tax' : 'net'}`} />
-        </div>
+        <div className="sheet"><table className="ss"><tbody>
+          <Band span={6} tag="base case">Headline</Band>
+          <tr>
+            <td className="lb">Net profit after {s.taxPct}% tax</td>
+            <td className={`n ${rBase.netProfit < 0 ? 'neg' : 'pos'}`} style={{ fontSize: 15, fontWeight: 700 }}>
+              {money(rBase.netProfit)}</td>
+            <td className="lb">ROI on cash</td><td className="n">{pct(rBase.roi)}</td>
+            <td className="lb">Annualized</td><td className="n">{pct(rBase.annualizedRoi)}</td>
+          </tr>
+          <tr>
+            <td className="lb">Margin — % of ARV, pre-tax</td><td className="n">{pct(rBase.marginPreTax)}</td>
+            <td className="lb">Max allowable offer</td><td className="n">{money0(mao)}</td>
+            <td className="lb">70% rule</td><td className="n">{money(seventyRule(s))}</td>
+          </tr>
+        </tbody></table></div>
 
-        <div className="notice">
-          <div>
-            <b>70% rule cross-check: {money(seventyRule(s))}</b>
-            {seventyRule(s) < mao
-              ? `Stricter than your own numbers by ${money0(mao - seventyRule(s))}. The rule assumes financing and selling costs that Bay Area price points don't match, so your MAO is the one to trust here.`
-              : `Looser than your own numbers by ${money0(seventyRule(s) - mao)}. Your underwrite says pay less than the rule of thumb does — trust the underwrite.`}
-          </div>
-        </div>
+        <div className="notice"><div>{seventyRule(s) < mao
+          ? `The 70% rule is stricter than your own numbers by ${money0(mao - seventyRule(s))}. It assumes financing and selling costs that Bay Area price points don't match, so trust your MAO.`
+          : `The 70% rule is looser than your own numbers by ${money0(seventyRule(s) - mao)}. Your underwrite says pay less than the rule of thumb — trust the underwrite.`}</div></div>
 
-        <Card title="Scenarios" tag="rehab × ARV — click a cell">
+        <div className="sheet">
+          <table className="ss"><tbody>
+            <Band span={4} tag="click a cell to load its column below">Scenarios — net profit after tax</Band>
+          </tbody></table>
           <div className="sc-wrap">
             <table className="sc-grid">
-              <thead>
-                <tr>
-                  <th className="rh">Rehab ↓ &nbsp; ARV →</th>
-                  {SCENARIO_KEYS.map(k => (
-                    <th key={k}>ARV {k}<span className="sub">{money0(s.arv[k])} · {money0(s.prop.sqft > 0 ? s.arv[k] / s.prop.sqft : 0)}/sf</span></th>
-                  ))}
-                </tr>
-              </thead>
+              <thead><tr>
+                <th className="rh">Rehab ↓ &nbsp; ARV →</th>
+                {SCENARIO_KEYS.map(k => (
+                  <th key={k}>ARV {k}<span className="sub">{money0(s.arv[k])} · {psf(s.arv[k], sqft)}</span></th>
+                ))}
+              </tr></thead>
               <tbody>
                 {grid.map((row, ri) => {
                   const rk = SCENARIO_KEYS[ri];
                   return (
                     <tr key={rk}>
-                      <th className="rh">Rehab {rk}<span className="sub">{money0(s.rehab[rk])} · {money0(s.prop.sqft > 0 ? s.rehab[rk] / s.prop.sqft : 0)}/sf</span></th>
+                      <th className="rh">Rehab {rk}<span className="sub">{money0(s.rehab[rk])} · {psf(s.rehab[rk], sqft)}</span></th>
                       {row.map(c => {
                         const on = sel.a === c.arvKey && sel.r === c.rehabKey;
                         return (
@@ -612,167 +665,158 @@ export default function FlipPage() {
               </tbody>
             </table>
           </div>
-        </Card>
-
-        <div className="flip-cols">
-          <Card title={`Profit & loss — ARV ${sel.a}, rehab ${sel.r}`} tag="click a row to expand">
-            <table className="wf">
-              <tbody>
-                <tr><td>Sale price</td><td className="v">{money0(r.sale)}</td><td className="pc">100%</td></tr>
-                {([
-                  ['sell', 'Less selling costs', r.sellTotal, r.sellLines],
-                ] as const).map(([k, label, amt, lines]) => (
-                  <FoldRow key={k} id={k} label={label} amount={amt} lines={lines as CostLine[]}
-                    sale={r.sale} expanded={expanded} setExpanded={setExpanded} />
-                ))}
-                <tr className="sub"><td>Net sale proceeds</td><td className="v">{money(r.netProceeds)}</td>
-                  <td className="pc">{pct(r.sale > 0 ? r.netProceeds / r.sale * 100 : 0)}</td></tr>
-                <tr><td>Less purchase price</td><td className="v neg">({money0(s.price)})</td>
-                  <td className="pc">{pct(r.sale > 0 ? s.price / r.sale * 100 : 0)}</td></tr>
-                {([
-                  ['acq', 'Less acquisition costs', r.acqTotal, r.acqLines],
-                  ['rehab', 'Less rehab incl. contingency', r.rehabTotal, [
-                    { label: 'Rehab budget', amount: r.rehabBase },
-                    { label: `Contingency at ${s.contingencyPct}%`, amount: r.contingency },
-                  ]],
-                  ['hold', 'Less holding costs', r.holdTotal, r.holdLines],
-                  ['fin', 'Less financing', r.finTotal, r.finLines],
-                ] as const).map(([k, label, amt, lines]) => (
-                  <FoldRow key={k} id={k} label={label} amount={amt} lines={lines as CostLine[]}
-                    sale={r.sale} expanded={expanded} setExpanded={setExpanded} />
-                ))}
-                <tr className="sub"><td>Pre-tax profit</td><td className="v">{money(r.preTaxProfit)}</td>
-                  <td className="pc">{pct(r.marginPreTax)}</td></tr>
-                <tr><td>Less income tax at {s.taxPct}%</td><td className="v neg">({money0(r.tax)})</td>
-                  <td className="pc">{pct(r.sale > 0 ? r.tax / r.sale * 100 : 0)}</td></tr>
-                <tr className="fin"><td>Net profit after tax</td><td className="v">{money(r.netProfit)}</td>
-                  <td className="pc">{pct(r.marginAfterTax)}</td></tr>
-              </tbody>
-            </table>
-          </Card>
-
-          <Card title="Capital" tag="what the deal actually needs">
-            <div className="cost-list">
-              <div className="cost-line"><span className="cl-l">Down payment</span><span className="cl-v">{money0(r.downPayment)}</span></div>
-              <div className="cost-line"><span className="cl-l">Acquisition costs</span><span className="cl-v">{money0(r.acqTotal)}</span></div>
-              <div className="cost-line"><span className="cl-l">Points, origination &amp; lender fees</span>
-                <span className="cl-v">{money0(r.cashToClose - r.downPayment - r.acqTotal)}</span></div>
-              <div className="cost-line total"><span className="cl-l">Cash to close</span><span className="cl-v">{money0(r.cashToClose)}</span></div>
-            </div>
-            <div className="cost-list" style={{ marginTop: 14 }}>
-              <div className="cost-line"><span className="cl-l">Rehab paid in cash</span><span className="cl-v">{money0(r.cashForRehab)}</span></div>
-              <div className="cost-line"><span className="cl-l">Holding costs</span><span className="cl-v">{money0(r.holdTotal)}</span></div>
-              <div className="cost-line"><span className="cl-l">Interest &amp; loan fees during hold</span>
-                <span className="cl-v">{money0(r.cashDuringHold - r.holdTotal - r.cashForRehab - r.principalPaid)}</span></div>
-              {r.principalPaid > 0 && (
-                <div className="cost-line" title="Not an expense — it returns to you as a smaller payoff at close">
-                  <span className="cl-l">Principal repaid <em>(returns at close)</em></span>
-                  <span className="cl-v">{money0(r.principalPaid)}</span></div>
-              )}
-              <div className="cost-line total"><span className="cl-l">Cash during hold</span><span className="cl-v">{money0(r.cashDuringHold)}</span></div>
-            </div>
-            <div className="tiles" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 16 }}>
-              <Tile label="Peak cash out of pocket" value={money0(r.peakCash)} note="the number that decides if you can do it" />
-              <Tile label="Cash back at close" value={money(r.cashBackAtClose)} note={`after ${money0(r.payoffAtSale)} payoff`} />
-            </div>
-            {r.withholding > 0 && (
-              <div className="notice" style={{ marginTop: 12 }}>
-                <div><b>CA withholding at close: {money0(r.withholding)}</b>
-                  A prepayment against the tax already in the P&amp;L — it reduces proceeds at close but is
-                  not an additional cost, so it is not subtracted twice.</div>
-              </div>
-            )}
-          </Card>
         </div>
+
+        <div className="sheet"><table className="ss pl">
+          {/* the band lives in the thead: a browser renders thead before tbody
+              whatever the source order, so a band in its own tbody would sit
+              below these column headers instead of titling them */}
+          <thead>
+            <Band span={4} tag={`ARV ${sel.a} — ${money0(s.arv[sel.a])}`}>Deal model</Band>
+            <tr>
+              <th className="lb">Scenario</th>
+              {SCENARIO_KEYS.map((k, i) => (
+                <th key={k} className={`n${i === selIdx ? ' on' : ''}`}>{k} rehab<br />{money0(s.rehab[k])}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <Sec span={4}>Scope &amp; timeline</Sec>
+            <PL label="Rehab incl. contingency" pick={r => r.rehabTotal} fmt={money0} />
+            <PL label="Total hold period — months" pick={r => r.holdMonths} fmt={n => n.toFixed(1)} />
+
+            <Sec span={4}>Sale proceeds</Sec>
+            <PL label="Gross sale price (ARV)" pick={r => r.sale} fmt={money0} />
+            <Fold id="sell" label="Less selling costs" pick={r => r.sellTotal} lines={cols[selIdx].sellLines} />
+            <PL cls="tot" label="Net sale proceeds" pick={r => r.netProceeds} fmt={money0} />
+
+            <Sec span={4}>Cost into the deal</Sec>
+            <PL label="Purchase price" pick={() => s.price} />
+            <Fold id="acq" label="Acquisition costs" pick={r => r.acqTotal} lines={cols[selIdx].acqLines} />
+            <PL label="Rehab incl. contingency" pick={r => r.rehabTotal} />
+            <Fold id="hold" label="Holding costs" pick={r => r.holdTotal} lines={cols[selIdx].holdLines} />
+            <Fold id="fin" label="Financing cost" pick={r => r.finTotal} lines={cols[selIdx].finLines} />
+
+            <Sec span={4}>Result</Sec>
+            <PL cls="tot" label="Pre-tax profit / (loss)" pick={r => r.preTaxProfit} fmt={money} />
+            <PL label={`Income tax at ${s.taxPct}%`} pick={r => r.tax} />
+            <PL cls="grand" label="Net profit after tax" pick={r => r.netProfit} fmt={money} />
+
+            <Sec span={4}>Returns</Sec>
+            <PL label="Return on cash — after tax" pick={r => r.roi} fmt={pct} />
+            <PL label="Annualized return" pick={r => r.annualizedRoi} fmt={pct} />
+            <PL label="Margin — % of ARV, pre-tax" pick={r => r.marginPreTax} fmt={pct} />
+
+            <Sec span={4}>Capital</Sec>
+            <PL label="Cash to close" pick={r => r.cashToClose} fmt={money0} />
+            <PL label="Cash during hold" pick={r => r.cashDuringHold} fmt={money0} />
+            <PL cls="tot" label="Peak cash out of pocket" pick={r => r.peakCash} fmt={money0} />
+            <PL label="Loan payoff at sale" pick={r => r.payoffAtSale} fmt={money0} />
+            <PL label="Cash back at close" pick={r => r.cashBackAtClose} fmt={money} />
+            {rBase.principalPaid > 0 &&
+              <PL label="Principal repaid — returns at close" pick={r => r.principalPaid} fmt={money0}
+                hint="a balance transfer, not an expense" />}
+            {rBase.withholding > 0 &&
+              <PL label="CA withholding at close" pick={r => r.withholding} fmt={money0}
+                hint="a prepayment against the tax above, not an extra cost" />}
+          </tbody>
+        </table></div>
       </section>
 
       {/* ============================================ TAB 3 — SENSITIVITY */}
       <section className={`pane${tab === 'sensitivity' ? ' on' : ''}`}>
-        <Card title="Net profit after tax" tag="ARV across · rehab down">
-          <div className="hm-wrap">
-            <table className="hm">
-              <thead>
-                <tr>
+        <div className="sheet">
+          <table className="ss"><tbody>
+            <Band span={4} tag="ARV across · rehab down">Net profit after tax</Band>
+          </tbody></table>
+          <div style={{ padding: '10px 12px 12px' }}>
+            <div className="hm-wrap">
+              <table className="hm">
+                <thead><tr>
                   <th className="corner">Rehab ↓ &nbsp; ARV →</th>
                   {sens.arvAxis.map((a, i) => (
-                    <th key={i}>{money0(a)}<span className="sub">{money0(s.prop.sqft > 0 ? a / s.prop.sqft : 0)}/sf</span></th>
+                    <th key={i}>{money0(a)}<span className="sub">{psf(a, sqft)}</span></th>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sens.cells.map((row, ri) => {
-                  /* first column where the row turns positive, and where it
-                     clears the floor — drawn as contours on the left edge */
-                  /* a contour marks a CROSSING — the first cell whose
-                     predecessor was on the other side. A row that is positive
-                     all the way across never crosses zero and gets no line. */
-                  const cross = (limit: number) =>
-                    row.findIndex((v, i) => i > 0 && v >= limit && row[i - 1] < limit);
-                  const be = cross(0);
-                  const thr = cross(s.minProfit);
-                  const nearest = (arr: number[], v: number) =>
-                    arr.reduce((best, x, i) => Math.abs(x - v) < Math.abs(arr[best] - v) ? i : best, 0);
-                  const baseR = nearest(sens.rehabAxis, sens.baseRehab);
-                  const baseA = nearest(sens.arvAxis, sens.baseArv);
-                  return (
-                    <tr key={ri}>
-                      <th className="rh">{money0(sens.rehabAxis[ri])}
-                        <span className="sub">{money0(s.prop.sqft > 0 ? sens.rehabAxis[ri] / s.prop.sqft : 0)}/sf</span></th>
-                      {row.map((v, ci) => (
-                        <td key={ci} style={heatColor(v, sens.min, sens.max)}
-                          className={`${be >= 0 && ci === be ? 'be' : ''}${thr >= 0 && ci === thr && thr !== be ? ' thr' : ''}${ri === baseR && ci === baseA ? ' base-cell' : ''}`}
-                          title={`ARV ${money0(sens.arvAxis[ci])} · rehab ${money0(sens.rehabAxis[ri])} → ${money0(v)}`}>
-                          {compact(v)}
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                </tr></thead>
+                <tbody>
+                  {sens.cells.map((row, ri) => {
+                    /* a contour marks a CROSSING — the first cell whose
+                       predecessor was on the other side. A row that never
+                       crosses gets no line. */
+                    const cross = (limit: number) =>
+                      row.findIndex((v, i) => i > 0 && v >= limit && row[i - 1] < limit);
+                    const be = cross(0);
+                    const thr = cross(s.minProfit);
+                    const nearest = (arr: number[], v: number) =>
+                      arr.reduce((best, x, i) => Math.abs(x - v) < Math.abs(arr[best] - v) ? i : best, 0);
+                    const baseR = nearest(sens.rehabAxis, sens.baseRehab);
+                    const baseA = nearest(sens.arvAxis, sens.baseArv);
+                    return (
+                      <tr key={ri}>
+                        <th className="rh">{money0(sens.rehabAxis[ri])}
+                          <span className="sub">{psf(sens.rehabAxis[ri], sqft)}</span></th>
+                        {row.map((v, ci) => (
+                          <td key={ci} style={heatColor(v, sens.min, sens.max)}
+                            className={`${be >= 0 && ci === be ? 'be' : ''}${thr >= 0 && ci === thr && thr !== be ? ' thr' : ''}${ri === baseR && ci === baseA ? ' base-cell' : ''}`}
+                            title={`ARV ${money0(sens.arvAxis[ci])} · rehab ${money0(sens.rehabAxis[ri])} → ${money(v)}`}>
+                            {compact(v)}
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="hm-legend">
+              <span className="k"><i className="bar" />Break-even — $0 net profit</span>
+              <span className="k"><i className="bar d" />Your {money0(s.minProfit)} profit floor</span>
+              <span className="k"><i className="box" />Base case</span>
+            </div>
+            <div className="hm-scale">
+              {Array.from({ length: 24 }, (_, i) => {
+                const v = sens.min + (sens.max - sens.min) * (i / 23);
+                return <i key={i} style={{ background: heatColor(v, sens.min, sens.max).background }} />;
+              })}
+            </div>
+            <div className="hm-scale-lbl">
+              <span>{money(sens.min)}</span>
+              {sens.min < 0 && sens.max > 0 && (
+                <span style={{ position: 'absolute', left: `${(-sens.min / (sens.max - sens.min)) * 100}%`, transform: 'translateX(-50%)' }}>$0</span>
+              )}
+              <span>{money(sens.max)}</span>
+            </div>
+            <p className="footnote">
+              Purchase price ({money0(s.price)}), timeline ({rBase.holdMonths.toFixed(1)} months), financing and the
+              {' '}{s.taxPct}% tax rate are held fixed — a two-variable slice, not a full-deal sensitivity.
+              Axes span your low-to-high scenarios with 10% headroom past each end.
+              {city && city.tiers.length > 1 && ' This city has a transfer tax cliff, so expect a visible step wherever the ARV range crosses it.'}
+            </p>
           </div>
-          <div className="hm-legend">
-            <span className="k"><i className="bar" />Break-even — $0 net profit</span>
-            <span className="k"><i className="bar d" />Your {money0(s.minProfit)} profit floor</span>
-            <span className="k"><i className="box" />Base case</span>
-          </div>
-          <div className="hm-scale">
-            {Array.from({ length: 24 }, (_, i) => {
-              const v = sens.min + (sens.max - sens.min) * (i / 23);
-              return <i key={i} style={{ background: heatColor(v, sens.min, sens.max).background }} />;
-            })}
-          </div>
-          <div className="hm-scale-lbl" style={{ position: 'relative' }}>
-            <span>{money(sens.min)}</span>
-            {sens.min < 0 && sens.max > 0 && (
-              <span style={{ position: 'absolute', left: `${(-sens.min / (sens.max - sens.min)) * 100}%`, transform: 'translateX(-50%)' }}>$0</span>
-            )}
-            <span>{money(sens.max)}</span>
-          </div>
-          <p className="footnote">
-            Purchase price ({money0(s.price)}), timeline ({rBase.holdMonths.toFixed(1)} months), financing and the
-            {' '}{s.taxPct}% tax rate are held fixed — this grid varies ARV and rehab only, so read it as a
-            two-variable slice rather than a full-deal sensitivity. Axes span your low-to-high scenarios with
-            10% headroom past each end.
-            {city && city.tiers.length > 1 && ' This city has a transfer tax cliff, so expect a visible step wherever the ARV range crosses it.'}
-          </p>
-        </Card>
+        </div>
       </section>
 
       {/* ============================================ TAB 4 — CHECKLIST */}
       <section className={`pane${tab === 'checklist' ? ' on' : ''}`}>
-        <Card dense title="Property" tag="seeds every quantity below">
-          <div className="cl-rooms">
-            {([['beds', 'Bedrooms'], ['baths', 'Full baths'], ['halfBaths', 'Half baths'], ['sqft', 'Sq ft'], ['stories', 'Stories'], ['garageBays', 'Garage bays']] as const).map(([k, label]) => (
-              <div className="pf-item" key={k}><label>{label}</label>
-                <NumInput fmt={k === 'sqft' ? 'money' : 'raw'} small value={s.prop[k]} onChange={v => setProp(k, v)} /></div>
-            ))}
+        <div className="flip-cols">
+          <div className="sheet" style={{ marginBottom: 0 }}><table className="ss"><tbody>
+            <Band tag="seeds every quantity below">Property</Band>
+            <R label="Square feet"><Money value={sqft} onChange={v => setProp('sqft', v)} /></R>
+            <R label="Bedrooms"><Num value={s.prop.beds} onChange={v => setProp('beds', v)} /></R>
+            <R label="Full baths"><Num value={s.prop.baths} onChange={v => setProp('baths', v)} /></R>
+            <R label="Half baths"><Num value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} /></R>
+            <R label="Stories"><Num value={s.prop.stories} onChange={v => setProp('stories', v)} /></R>
+            <R label="Garage bays"><Num value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} /></R>
+          </tbody></table></div>
+          <div className="notice" style={{ marginBottom: 0 }}>
+            <div><b>Prices are shared across every deal</b>
+              Edit one here and it is corrected everywhere, for good. What this deal owns is which items are
+              checked and any quantity you override — so a price you fix after a real bid comes in improves
+              every future underwrite instead of just this one.</div>
           </div>
-          <p className="footnote" style={{ marginTop: 10 }}>
-            Prices are shared across every deal — edit one here and it is corrected everywhere, for good.
-            What this deal owns is which items are checked and any quantity you override.
-          </p>
-        </Card>
+        </div>
+
+        <div style={{ height: 14 }} />
 
         {CATALOG.map(sec => {
           const t = checklist.sections.find(x => x.id === sec.id)!;
@@ -787,13 +831,11 @@ export default function FlipPage() {
               </div>
               <div className="cl-body">
                 <div className="cl-head">
-                  <span />
-                  <span className="l">Item</span>
+                  <span /><span className="l">Item</span>
                   <span>Qty</span><span>Low</span><span>Base</span><span>High</span>
                 </div>
                 {sec.items.map(i => {
                   const on = !!s.checked[i.id];
-                  const q = qtyOf(i);
                   return (
                     <div className={`cl-row${on ? ' on' : ''}`} key={i.id}>
                       <input type="checkbox" checked={on}
@@ -804,7 +846,8 @@ export default function FlipPage() {
                       </div>
                       {i.pctOfHard
                         ? <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-faint)' }}>—</div>
-                        : <NumInput fmt="raw" value={q} onChange={v => setS(p => ({ ...p, qty: { ...p.qty, [i.id]: v } }))} />}
+                        : <NumInput fmt="raw" value={qtyOf(i)}
+                            onChange={v => setS(p => ({ ...p, qty: { ...p.qty, [i.id]: v } }))} />}
                       {(['low', 'base', 'high'] as const).map(k => (
                         <NumInput key={k} fmt="raw" value={priceOf(i, k)}
                           className={catalogPrices[`${i.id}.${k}`] !== undefined ? 'edited' : ''}
@@ -820,20 +863,16 @@ export default function FlipPage() {
 
         <div className="cl-sticky">
           <div className="grp"><span className="lbl">Low</span>
-            <span className="val">{money0(checklist.low)}
-              <span className="psf">{s.prop.sqft > 0 ? `${money0(checklist.low / s.prop.sqft)}/sf` : ''}</span></span></div>
+            <span className="val">{money0(checklist.low)}<span className="psf">{psf(checklist.low, sqft)}</span></span></div>
           <div className="grp"><span className="lbl">Base</span>
-            <span className="val">{money0(checklist.base)}
-              <span className="psf">{s.prop.sqft > 0 ? `${money0(checklist.base / s.prop.sqft)}/sf` : ''}</span></span></div>
+            <span className="val">{money0(checklist.base)}<span className="psf">{psf(checklist.base, sqft)}</span></span></div>
           <div className="grp"><span className="lbl">High</span>
-            <span className="val">{money0(checklist.high)}
-              <span className="psf">{s.prop.sqft > 0 ? `${money0(checklist.high / s.prop.sqft)}/sf` : ''}</span></span></div>
+            <span className="val">{money0(checklist.high)}<span className="psf">{psf(checklist.high, sqft)}</span></span></div>
           <div className="grp"><span className="lbl">Checked</span><span className="val">{checklist.checkedCount}</span></div>
           <div className="push">
             <button className="btn" onClick={sow} disabled={!checklist.checkedCount}>⬇ Scope of Work</button>
             <button className="btn primary" onClick={pushChecklist} disabled={!checklist.checkedCount}>
-              Use as rehab budget
-            </button>
+              Use as rehab budget</button>
           </div>
         </div>
       </section>
@@ -844,33 +883,6 @@ export default function FlipPage() {
         measure, so confirm before relying on them. Property tax assumes Prop 13 reassessment to the
         purchase price. Flip profit is treated as ordinary income at one blended rate, not capital gains.
       </p>
-    </>
-  );
-}
-
-/* An expandable "less …" row in the waterfall. */
-function FoldRow({ id, label, amount, lines, sale, expanded, setExpanded }: {
-  id: string; label: string; amount: number; lines: CostLine[]; sale: number;
-  expanded: Record<string, boolean>; setExpanded: (f: (p: Record<string, boolean>) => Record<string, boolean>) => void;
-}) {
-  const open = !!expanded[id];
-  return (
-    <>
-      <tr>
-        <td>
-          <button className="exp" onClick={() => setExpanded(p => ({ ...p, [id]: !p[id] }))}>
-            {open ? '▾' : '▸'}
-          </button>
-          {label}
-        </td>
-        <td className="v neg">({money0(amount)})</td>
-        <td className="pc">{pct(sale > 0 ? amount / sale * 100 : 0)}</td>
-      </tr>
-      {open && lines.filter(l => l.amount !== 0).map((l, i) => (
-        <tr className="detail" key={i}>
-          <td>{l.label}</td><td className="v">{money0(l.amount)}</td><td className="pc" />
-        </tr>
-      ))}
     </>
   );
 }
