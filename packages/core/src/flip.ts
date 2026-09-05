@@ -36,45 +36,72 @@ export interface Triple { low: number; base: number; high: number; }
 
 /* ---------------------------------------------------------------- line items */
 
-export interface LineDef { id: string; label: string; val: number; hint?: string; }
+export interface LineDef {
+  id: string; label: string; val: number;
+  /** short clarification under the label */
+  hint?: string;
+  /** guidance for the notes column — where the number comes from, what range is
+      normal, and when to move it. Written for someone doing their first flip. */
+  note?: string;
+}
 
 /** Acquisition costs. Loan points and lender fees are deliberately absent —
     they belong to financing, so changing leverage moves one number, not two. */
 export const ACQ_ITEMS: LineDef[] = [
-  { id: 'escrow', label: 'Escrow fee — buy side', val: 1800 },
-  { id: 'titleLender', label: "Lender's title policy", val: 1400 },
-  { id: 'recording', label: 'County recording', val: 225 },
-  { id: 'inspGeneral', label: 'General home inspection', val: 650 },
-  { id: 'inspPest', label: 'Pest / termite inspection', val: 400 },
-  { id: 'inspSewer', label: 'Sewer lateral video scope', val: 350, hint: 'A failed lateral is a five-figure surprise — scope it' },
-  { id: 'inspFoundation', label: 'Foundation / structural', val: 800 },
-  { id: 'inspRoof', label: 'Roof inspection', val: 350 },
-  { id: 'appraisal', label: 'Appraisal / BPO', val: 900 },
-  { id: 'miscAcq', label: 'Wire, notary, courier, misc', val: 250 },
-  { id: 'buyComm', label: 'Buy-side commission', val: 0 },
+  { id: 'escrow', label: 'Escrow fee — buy side', val: 1800,
+    note: 'Roughly $2 per $1,000 of price plus a base fee. Buyer and seller each pay their own side in most Bay Area counties.' },
+  { id: 'titleLender', label: "Lender's title policy", val: 1400,
+    note: 'Required by any lender, and buyer-paid. The seller pays the separate owner\u2019s policy. Drops to $0 on an all-cash purchase.' },
+  { id: 'recording', label: 'County recording', val: 225,
+    note: 'Fixed county charge for recording the deed and the deed of trust. Barely moves with price.' },
+  { id: 'inspGeneral', label: 'General home inspection', val: 0,
+    note: '$500\u2013800 if you order your own. The seller\u2019s disclosure package normally already includes one, which is why this defaults to $0.' },
+  { id: 'inspPest', label: 'Pest / termite inspection', val: 0,
+    note: '$350\u2013500. Almost always in the seller\u2019s package. What matters is the Section 1 clearance cost, which belongs in your rehab budget, not here.' },
+  { id: 'inspSewer', label: 'Sewer lateral video scope', val: 350,
+    note: 'Worth paying for even when disclosed. A failed lateral is $15k\u201330k, and Oakland, Berkeley, Albany and Piedmont require a compliance certificate at sale.' },
+  { id: 'inspFoundation', label: 'Foundation / structural', val: 0,
+    note: '$600\u20131,000. Order one on anything pre-1950 or with visible cracking \u2014 foundation replacement runs $85\u2013210/sf and will end the deal.' },
+  { id: 'inspRoof', label: 'Roof inspection', val: 0,
+    note: '$300\u2013450, usually in the seller\u2019s package.' },
+  { id: 'appraisal', label: 'Appraisal / BPO', val: 900,
+    note: '$700\u20131,100, lender-required and buyer-paid. Set to $0 if you are buying all cash.' },
+  { id: 'miscAcq', label: 'Wire, notary, courier, misc', val: 250,
+    note: 'Small fixed escrow charges. Rarely worth arguing about.' },
+  { id: 'buyComm', label: 'Buy-side commission', val: 0,
+    note: 'Zero if you represent yourself. If you are the agent on the buy side, that commission is income to you, not a cost \u2014 this model does not yet count it.' },
 ];
 
 /** Holding costs, all $/month over the hold period. */
 export const HOLD_ITEMS: LineDef[] = [
-  { id: 'insVacant', label: 'Vacant dwelling insurance', val: 350, hint: 'A standard HO-3 will not cover an unoccupied property' },
-  { id: 'electric', label: 'Electricity', val: 90 },
-  { id: 'water', label: 'Water', val: 60 },
-  { id: 'gas', label: 'Gas', val: 40 },
-  { id: 'trash', label: 'Trash', val: 30 },
-  { id: 'landscape', label: 'Landscaping & site upkeep', val: 150 },
-  { id: 'security', label: 'Security — alarm, cameras, boarding', val: 85 },
-  { id: 'hoa', label: 'HOA dues', val: 0 },
-  { id: 'entity', label: 'Entity, bookkeeping, misc', val: 100 },
+  { id: 'insVacant', label: 'Vacant dwelling insurance', val: 350,
+    note: '$250\u2013450/mo and not optional \u2014 a standard HO-3 voids the moment the property is unoccupied.' },
+  { id: 'electric', label: 'Electricity', val: 90, note: 'Construction power runs well above a lived-in bill.' },
+  { id: 'water', label: 'Water', val: 60, note: 'Keep it on for the trades and for landscaping through the marketing period.' },
+  { id: 'gas', label: 'Gas', val: 40, note: 'Often shut off during a gut and back on for staging.' },
+  { id: 'trash', label: 'Trash', val: 30, note: 'Separate from demolition dumpsters, which sit in the rehab budget.' },
+  { id: 'landscape', label: 'Landscaping & site upkeep', val: 150,
+    note: 'An overgrown yard reads as a distressed listing. Cheap insurance during days on market.' },
+  { id: 'security', label: 'Security — alarm, cameras, boarding', val: 85,
+    note: 'Copper theft and squatting are real risks on a vacant Bay Area property, especially mid-rehab.' },
+  { id: 'hoa', label: 'HOA dues', val: 0, note: 'Condos and PUDs only. Check for a special assessment before you write the offer.' },
+  { id: 'entity', label: 'Entity, bookkeeping, misc', val: 100,
+    note: 'LLC franchise tax, bookkeeping, bank fees \u2014 the overhead a project carries whether or not you think about it.' },
 ];
 
 /** Selling costs charged as a flat dollar amount. */
 export const SELL_FLAT_ITEMS: LineDef[] = [
-  { id: 'escrowSell', label: 'Escrow fee — sell side', val: 2200 },
-  { id: 'titleOwner', label: "Owner's title policy", val: 3400 },
-  { id: 'recordingSell', label: 'County recording — sell side', val: 225 },
-  { id: 'nhd', label: 'Natural hazard disclosure report', val: 150 },
-  { id: 'warranty', label: 'Home warranty', val: 600 },
-  { id: 'stagingSetup', label: 'Staging — setup', val: 4500 },
+  { id: 'escrowSell', label: 'Escrow fee — sell side', val: 2200,
+    note: 'Your half of escrow on the way out. Scales gently with price.' },
+  { id: 'titleOwner', label: "Owner's title policy", val: 3400,
+    note: 'Seller-paid by custom in most Bay Area counties. Roughly $2.50\u20133 per $1,000 of sale price.' },
+  { id: 'recordingSell', label: 'County recording — sell side', val: 225, note: 'Fixed county charge.' },
+  { id: 'nhd', label: 'Natural hazard disclosure report', val: 150,
+    note: 'Required in California on every residential sale. A fixed vendor fee.' },
+  { id: 'warranty', label: 'Home warranty', val: 600,
+    note: 'A one-year buyer policy. Not required, but a cheap way to take an objection off the table.' },
+  { id: 'stagingSetup', label: 'Staging — setup', val: 4500,
+    note: 'Bay Area staging runs $4\u20136k to install. Dollar for dollar it is the highest-return line in the selling budget.' },
 ];
 
 /* ---------------------------------------------------------------- the state */

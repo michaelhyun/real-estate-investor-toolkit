@@ -743,6 +743,30 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
   border:1px solid var(--line-strong); border-radius:7px; background:var(--card);
   box-shadow:var(--shadow); overflow:hidden; margin-bottom:14px;
 }
+/* the assumptions tab is one uninterrupted sheet — sections are separated by a
+   header row and nothing else, the way they would be on a worksheet */
+.sheet.one { margin-bottom:0; }
+.sheet.one .ss tr.band td { border-top:1px solid var(--ink); }
+.sheet.one .ss tr:first-child td { border-top:none; }
+
+/* ---------- the guidance column ---------- */
+.ss td.note { display:none; }
+.ss.with-notes td.note {
+  display:table-cell; width:38%; font-size:11px; line-height:1.45; color:var(--ink-soft);
+  border-left:1px solid var(--line); padding:4px 11px; vertical-align:top;
+}
+.ss td.note b { color:var(--ink); font-weight:600; }
+.ss td.note .ok   { color:var(--accent-strong); font-weight:700; }
+.ss td.note .warn { color:var(--warn); font-weight:700; }
+.ss td.note .bad  { color:var(--neg); font-weight:700; }
+.ss tr.sec td.note, .ss tr.band td.note { border-left:none; }
+/* a section-wide note, spanning under its header */
+.ss tr.guide td {
+  background:#faf8f3; border-bottom:1px solid var(--line-strong);
+  font-size:11px; line-height:1.5; color:var(--ink-soft); padding:7px 11px;
+}
+.ss tr.guide td b { color:var(--ink); font-weight:700; }
+@media (max-width: 1080px) { .ss td.note { display:none; } }
 .ss { width:100%; border-collapse:collapse; font-size:12.5px; }
 .ss td, .ss th { padding:3px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
 .ss tr:last-child td { border-bottom:none; }
@@ -763,8 +787,11 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
   letter-spacing:.07em; text-transform:uppercase; padding:5px 10px;
   border-top:1px solid var(--line-strong); border-bottom:1px solid var(--line-strong);
 }
-.ss tr:hover > td { background:#fbfaf8; }
-.ss tr.band:hover > td, .ss tr.sec:hover > td, .ss tr.tot:hover > td, .ss tr.grand:hover > td { background:inherit; }
+/* Hover only the plain data rows. The earlier blanket rule repainted the
+   tinted band/section/total rows too, and `background:inherit` on a td
+   resolves to the row's transparent background — i.e. the card's white — which
+   is why every tinted row flashed white under the cursor. */
+.ss tr:not(.band):not(.sec):not(.tot):not(.grand):not(.detail):hover > td { background:#f6f4ef; }
 
 .ss td.lb { color:var(--ink); }
 .ss td.lb .sub { display:block; font-size:10.5px; color:var(--ink-faint); line-height:1.35; margin-top:1px; }
@@ -831,7 +858,8 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
   display:block; width:100%; border:none; background:none; cursor:pointer;
   padding:7px 10px 6px; text-align:right; font-family:var(--sans);
 }
-.sc-grid td button:hover { background:#fbfaf8; }
+/* never on the selected cell — hovering it would wash its tint to white */
+.sc-grid td:not(.sel) button:hover { background:#f6f4ef; }
 .sc-grid td .p { display:block; font-family:var(--mono); font-size:15px; font-weight:600; letter-spacing:-.02em; }
 .sc-grid td .r { display:block; font-family:var(--mono); font-size:10px; color:var(--ink-faint); margin-top:1px; }
 .sc-grid td.neg .p { color:var(--neg); }
@@ -878,7 +906,7 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
 .cl-head span.l { text-align:left; }
 .cl-row { border-bottom:1px solid var(--line); }
 .cl-row:last-child { border-bottom:none; }
-.cl-row:hover { background:#fbfaf8; }
+.cl-row:not(.on):hover { background:#f6f4ef; }
 .cl-row.on { background:var(--accent-soft); }
 .cl-row .d { font-size:12px; min-width:0; }
 .cl-row .d .nt { display:block; font-size:10px; color:var(--ink-faint); font-style:italic; }

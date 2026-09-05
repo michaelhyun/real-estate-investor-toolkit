@@ -91,10 +91,16 @@ const Sec = ({ children, span = 3 }: { children: React.ReactNode; span?: number 
   <tr className="sec"><td colSpan={span}>{children}</td></tr>
 );
 
-/** An editable row: label, the input, then a static unit or derived figure. */
-function R({ label, hint, unit, children, ctl }: {
+/** A section-wide guidance row, sitting directly under its band header. */
+const G = ({ children }: { children: React.ReactNode }) => (
+  <tr className="guide"><td colSpan={4}>{children}</td></tr>
+);
+
+/** An editable row: label, the input, a static unit, then guidance. The note
+    cell is only shown on tables marked `with-notes`. */
+function R({ label, hint, unit, children, ctl, note }: {
   label: React.ReactNode; hint?: string; unit?: React.ReactNode;
-  children?: React.ReactNode; ctl?: React.ReactNode;
+  children?: React.ReactNode; ctl?: React.ReactNode; note?: React.ReactNode;
 }) {
   return (
     <tr>
@@ -103,19 +109,22 @@ function R({ label, hint, unit, children, ctl }: {
         <td className="n">{children}</td>
         <td className="u">{unit}</td>
       </>}
+      <td className="note">{note}</td>
     </tr>
   );
 }
 
 /** A read-only computed row. */
-function V({ label, hint, value, unit, cls }: {
-  label: React.ReactNode; hint?: string; value: React.ReactNode; unit?: React.ReactNode; cls?: string;
+function V({ label, hint, value, unit, cls, note }: {
+  label: React.ReactNode; hint?: string; value: React.ReactNode;
+  unit?: React.ReactNode; cls?: string; note?: React.ReactNode;
 }) {
   return (
     <tr className={cls}>
       <td className="lb">{label}{hint && <span className="sub">{hint}</span>}</td>
       <td className="n">{value}</td>
       <td className="u">{unit}</td>
+      <td className="note">{note}</td>
     </tr>
   );
 }
@@ -210,6 +219,28 @@ export default function FlipPage() {
   const sens = useMemo(() => buildSensitivity(s, 7), [s]);
   const mao = useMemo(() => solveMAO(s), [s]);
   const verdict = verdictFor(rBase, s);
+
+  /* Screening benchmarks. These are rules of thumb, not rules — they exist so a
+     number on screen carries a sense of whether it is normal for the Bay Area. */
+  const band = (v: number, good: number, ok: number, labels: [string, string, string]) =>
+    v >= good ? <span className="ok">{labels[0]}</span>
+    : v >= ok ? <span className="warn">{labels[1]}</span>
+    : <span className="bad">{labels[2]}</span>;
+  const spreadVerdict = band(rBase.grossSpread, 25, 20,
+    ['comfortably in range', 'thin, but workable', 'too thin for the risk']);
+  const rehabVerdict = rBase.rehabPsf <= 160
+    ? <span className="ok">cosmetic territory</span>
+    : rBase.rehabPsf <= 350
+      ? <span className="ok">gut territory</span>
+      : <span className="warn">above a normal gut — check the scope</span>;
+  const holdVerdict = rBase.holdMonths <= 8
+    ? <span className="ok">normal</span>
+    : rBase.holdMonths <= 11
+      ? <span className="warn">long — carry costs compound</span>
+      : <span className="bad">very long for a flip</span>;
+  const sellVerdict = rBase.sellPctOfSale <= 9
+    ? <span className="ok">in range</span>
+    : <span className="warn">above the usual 7–9%</span>;
   const selIdx = SCENARIO_KEYS.indexOf(sel.r);
 
   const diverged = s.rehabSource === 'checklist' && checklist.checkedCount > 0 &&
@@ -377,230 +408,293 @@ export default function FlipPage() {
       <section className={`pane${tab === 'assumptions' ? ' on' : ''}`}>
         {city?.note && <div className="notice warn"><div><b>{city.name}</b>{city.note}</div></div>}
 
-        <div className="flip-cols">
-          <div>
-            <div className="sheet"><table className="ss"><tbody>
-              <Band tag={`${pct(rBase.grossSpread)} gross spread`}>Property &amp; deal</Band>
-              <R label="City" hint="sets transfer tax, property tax rate and retrofit" ctl={
-                <select className="sel-city" value={s.citySlug} onChange={ev => applyCity(ev.target.value)}>
-                  <option value="">Not listed — enter rates manually</option>
-                  {citiesByCounty().map(g => (
-                    <optgroup key={g.county} label={`${g.county} County`}>
-                      {g.cities.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
-                    </optgroup>
-                  ))}
-                </select>} />
-              <R label="Square feet"><Money value={sqft} onChange={v => setProp('sqft', v)} /></R>
-              <R label="Beds / full baths / half" ctl={
-                <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
-                  <NumInput fmt="raw" small value={s.prop.beds} onChange={v => setProp('beds', v)} />
-                  <NumInput fmt="raw" small value={s.prop.baths} onChange={v => setProp('baths', v)} />
-                  <NumInput fmt="raw" small value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} />
-                </div>} />
-              <R label="Stories / garage bays" ctl={
-                <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
-                  <NumInput fmt="raw" small value={s.prop.stories} onChange={v => setProp('stories', v)} />
-                  <NumInput fmt="raw" small value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} />
-                </div>} />
-              <R label="Year built" ctl={
-                <input className="num small" value={s.prop.year} autoComplete="off"
-                  onChange={ev => setProp('year', ev.target.value)} />} />
-              <Sec>Purchase</Sec>
-              <R label="Purchase price" unit={psf(s.price, sqft)}>
-                <Money value={s.price} onChange={v => set('price', v)} /></R>
-              <Sec>After-repair value</Sec>
-              {SCENARIO_KEYS.map(k => (
-                <R key={k} label={`ARV — ${k}`} unit={psf(s.arv[k], sqft)}>
-                  <Money value={s.arv[k]} onChange={v => setArv(k, v)} /></R>
+        <div className="sheet one"><table className="ss with-notes"><tbody>
+
+          {/* ---------------------------------------------- property */}
+          <Band span={4} tag={`${pct(rBase.grossSpread)} gross spread`}>Property &amp; deal</Band>
+          <R label="City" hint="sets transfer tax, property tax and retrofit"
+            note="Transfer tax is the one cost that swings wildly by city. Most of San Mateo and Santa Clara counties sit at the county floor; Oakland, Berkeley and Piedmont do not."
+            ctl={
+            <select className="sel-city" value={s.citySlug} onChange={ev => applyCity(ev.target.value)}>
+              <option value="">Not listed — enter rates manually</option>
+              {citiesByCounty().map(g => (
+                <optgroup key={g.county} label={`${g.county} County`}>
+                  {g.cities.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+                </optgroup>
               ))}
-              <V cls="tot" label="Gross spread at base ARV"
-                value={money0(s.arv.base - s.price)} unit={pct(rBase.grossSpread)} />
-            </tbody></table></div>
+            </select>} />
+          <R label="Square feet" note="Living area from the tax record. Every per-foot figure in this tool divides by it, so get it right before anything else."
+            ><Money value={sqft} onChange={v => setProp('sqft', v)} /></R>
+          <R label="Beds / full baths / half"
+            note="Drives the quantities on the cost checklist — a 4/3 prices out three showers, not one." ctl={
+            <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
+              <NumInput fmt="raw" small value={s.prop.beds} onChange={v => setProp('beds', v)} />
+              <NumInput fmt="raw" small value={s.prop.baths} onChange={v => setProp('baths', v)} />
+              <NumInput fmt="raw" small value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} />
+            </div>} />
+          <R label="Stories / garage bays" note="Used to estimate the foundation perimeter for seismic work and gutters." ctl={
+            <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
+              <NumInput fmt="raw" small value={s.prop.stories} onChange={v => setProp('stories', v)} />
+              <NumInput fmt="raw" small value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} />
+            </div>} />
+          <R label="Year built" note="Anything pre-1980 should assume asbestos and lead until tested; pre-1950 should assume knob-and-tube and an unbolted foundation." ctl={
+            <input className="num small" value={s.prop.year} autoComplete="off"
+              onChange={ev => setProp('year', ev.target.value)} />} />
 
-            <div className="sheet"><table className="ss"><tbody>
-              <Band tag={s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}>Rehab budget</Band>
-              {SCENARIO_KEYS.map(k => (
-                <R key={k} label={`Rehab — ${k}`} unit={psf(s.rehab[k], sqft)}>
-                  <Money value={s.rehab[k]} onChange={v => setRehab(k, v)} /></R>
-              ))}
-              <R label="Contingency" hint="on top of each scenario, its own P&amp;L line" unit="%">
-                <Num value={s.contingencyPct} onChange={v => set('contingencyPct', v)} /></R>
-              <V cls="tot" label="Base rehab incl. contingency"
-                value={money0(rBase.rehabTotal)} unit={psf(rBase.rehabTotal, sqft)} />
-            </tbody></table></div>
-            {diverged && (
-              <div className="notice warn">
-                <div><b>Checklist and budget have diverged</b>
-                  Checklist says {money0(checklist.base)} base; this deal uses {money0(s.rehab.base)}.</div>
-                <div className="act">
-                  <button onClick={pushChecklist}>Re-sync</button>
-                  <button onClick={() => set('rehabSource', 'manual')}>Keep mine</button>
-                </div>
-              </div>
-            )}
-            {checklist.checkedCount > 0 && s.rehabSource === 'manual' && (
-              <div className="notice">
-                <div><b>{checklist.checkedCount} items checked on the checklist</b>
-                  They total {money0(checklist.base)} at base.</div>
-                <div className="act"><button onClick={pushChecklist}>Use these</button></div>
-              </div>
-            )}
+          <Sec span={4}>Purchase &amp; after-repair value</Sec>
+          <R label="Purchase price" unit={psf(s.price, sqft)}
+            note={<>What you actually pay, not list. The 70% rule says {money0(seventyRule(s))} here; your own underwrite says {money0(mao)}.</>}>
+            <Money value={s.price} onChange={v => set('price', v)} /></R>
+          <R label="ARV — low" unit={psf(s.arv.low, sqft)}
+            note="What it sells for in a slow month with a picky appraiser. Not a disaster case — that is what the sensitivity grid is for.">
+            <Money value={s.arv.low} onChange={v => setArv('low', v)} /></R>
+          <R label="ARV — base" unit={psf(s.arv.base, sqft)}
+            note="Closed comps within half a mile and 90 days, adjusted to your finish level. Everything in the model keys off this.">
+            <Money value={s.arv.base} onChange={v => setArv('base', v)} /></R>
+          <R label="ARV — high" unit={psf(s.arv.high, sqft)}
+            note="The top of the range if the finish lands and the market holds. Never underwrite to it.">
+            <Money value={s.arv.high} onChange={v => setArv('high', v)} /></R>
+          <V cls="tot" label="Gross spread at base ARV" value={money0(s.arv.base - s.price)}
+            unit={pct(rBase.grossSpread)}
+            note={<><b>Target 25–30% of ARV</b> as a screening rule. You are at {pct(rBase.grossSpread)} — {spreadVerdict}. Below 20% there is not enough room for a rehab overrun and a soft market at the same time.</>} />
 
-            <div className="sheet"><table className="ss"><tbody>
-              <Band tag={`${rBase.holdMonths.toFixed(1)} mo hold`}>Timeline</Band>
-              <R label="Rehab duration" hint="fold permit and design time in here" unit="months">
-                <Num value={s.rehabMonths} onChange={v => set('rehabMonths', v)} /></R>
-              <R label="Days on market" hint="list to accepted offer" unit="days">
-                <Num value={s.domDays} onChange={v => set('domDays', v)} /></R>
-              <R label="Escrow period" hint="accepted offer to close" unit="days">
-                <Num value={s.escrowDays} onChange={v => set('escrowDays', v)} /></R>
-              <R label="Schedule overrun" hint="costs you holding AND interest" unit="months">
-                <Num value={s.overrunMonths} onChange={v => set('overrunMonths', v)} /></R>
-              <V cls="tot" label="Total hold period" value={rBase.holdMonths.toFixed(1)} unit="months" />
-            </tbody></table></div>
+          {/* ---------------------------------------------- rehab */}
+          <Band span={4} tag={s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}>Rehab budget</Band>
+          <G>Build these on the <b>Cost Checklist</b> tab and push them here, or type them straight in. Bay Area
+            pricing: a cosmetic refresh runs <b>$90–160/sf</b>, a full gut <b>$200–350/sf</b>. Yours is {money0(rBase.rehabPsf)}/sf
+            at base — {rehabVerdict}.</G>
+          <R label="Rehab — low" unit={psf(s.rehab.low, sqft)}
+            note="Everything goes right: no dry rot, no surprises behind the walls, subs available when you need them.">
+            <Money value={s.rehab.low} onChange={v => setRehab('low', v)} /></R>
+          <R label="Rehab — base" unit={psf(s.rehab.base, sqft)}
+            note="What you would tell a partner the job costs. This is the number the deal lives or dies on.">
+            <Money value={s.rehab.base} onChange={v => setRehab('base', v)} /></R>
+          <R label="Rehab — high" unit={psf(s.rehab.high, sqft)}
+            note="You open the walls and find the reason it was cheap. On anything pre-1950 this is the honest case, not the pessimistic one.">
+            <Money value={s.rehab.high} onChange={v => setRehab('high', v)} /></R>
+          <R label="Contingency" unit="%"
+            note="10% on a cosmetic scope, 15–20% on a gut or anything pre-1950. Shown as its own P&L line so the rehab number stays honest.">
+            <Num value={s.contingencyPct} onChange={v => set('contingencyPct', v)} /></R>
+          <V cls="tot" label="Base rehab incl. contingency" value={money0(rBase.rehabTotal)}
+            unit={psf(rBase.rehabTotal, sqft)}
+            note={<>{checklist.checkedCount > 0
+              ? <>Checklist has {checklist.checkedCount} items at {money0(checklist.base)} base.</>
+              : <>Nothing checked on the checklist yet.</>}</>} />
 
-            <div className="sheet"><table className="ss"><tbody>
-              <Band>Tax &amp; thresholds</Band>
-              <R label="Blended tax rate" hint="ordinary income, not capital gains" unit="%">
-                <Num value={s.taxPct} onChange={v => set('taxPct', v)} /></R>
-              <R label="A loss shelters other income" hint="off by default — no phantom benefit" ctl={
-                <Switch checked={s.lossOffsetsIncome} onChange={v => set('lossOffsetsIncome', v)} />} />
-              <R label="Minimum profit" hint="your floor — what MAO solves against">
-                <Money value={s.minProfit} onChange={v => set('minProfit', v)} /></R>
-              <R label="Floor is measured" ctl={
-                <UnitToggle options={[{ u: 'after', label: 'after tax' }, { u: 'pre', label: 'pre-tax' }]}
-                  value={s.minProfitBasis} onChange={u => set('minProfitBasis', u as 'after' | 'pre')} />} />
-            </tbody></table></div>
+          {/* ---------------------------------------------- timeline */}
+          <Band span={4} tag={`${rBase.holdMonths.toFixed(1)} mo hold`}>Timeline</Band>
+          <G>Time is the quietest killer in a flip: every extra month costs holding <b>and</b> interest at once.
+            Bay Area projects typically run <b>5–8 months</b> door to door. Yours is {rBase.holdMonths.toFixed(1)} — {holdVerdict}.</G>
+          <R label="Rehab duration" unit="months"
+            note="Fold permits and design in here. Bay Area plan check can add 2–4 months before a shovel moves, and most blown flip budgets are blown on the calendar, not the scope.">
+            <Num value={s.rehabMonths} onChange={v => set('rehabMonths', v)} /></R>
+          <R label="Days on market" unit="days"
+            note="List to accepted offer. Bay Area DOM ran 15–25 days through 2026. Use 30+ if you are pricing above the neighbourhood ceiling.">
+            <Num value={s.domDays} onChange={v => set('domDays', v)} /></R>
+          <R label="Escrow period" unit="days"
+            note="Accepted offer to close. 21–30 days is standard; a cash buyer can do 14.">
+            <Num value={s.escrowDays} onChange={v => set('escrowDays', v)} /></R>
+          <R label="Schedule overrun" unit="months"
+            note="Add months here to see what a slip actually costs. Turning this to 2 is the cheapest stress test in the tool.">
+            <Num value={s.overrunMonths} onChange={v => set('overrunMonths', v)} /></R>
+          <V cls="tot" label="Total hold period" value={rBase.holdMonths.toFixed(1)} unit="months"
+            note={<>Drives every holding cost and all interest. At {money0(rBase.holdMonthly)}/mo plus interest, a
+              one-month slip costs roughly {money0(rBase.holdMonthly + rBase.interest / Math.max(1, rBase.holdMonths))}.</>} />
+
+          {/* ---------------------------------------------- acquisition */}
+          <Band span={4} tag={money0(rBase.acqTotal)}>Acquisition costs</Band>
+          <G><b>California sellers normally deliver a disclosure package before offers</b> — TDS, SPQ, NHD and
+            usually pest, home and roof reports already paid for. The inspection lines below therefore default
+            to $0. Turn one back on only where you want your own independent look, and note that what the
+            reports find belongs in the rehab budget, not here.</G>
+          {ACQ_ITEMS.map(i => (
+            <R key={i.id} label={i.label} hint={i.hint} note={i.note}>
+              <Money value={s.acq[i.id] ?? 0} onChange={v => setMap('acq', i.id, v)} /></R>
+          ))}
+          {rBase.acqLines.filter(l => l.derived && l.amount !== 0).map((l, i) => (
+            <V key={i} label={l.label} value={money0(l.amount)} unit="auto"
+              note="Computed from the city preset and who pays, above." />
+          ))}
+          <V cls="tot" label="Total acquisition" value={money0(rBase.acqTotal)}
+            unit={pct(s.price > 0 ? rBase.acqTotal / s.price * 100 : 0)}
+            note="Typically 0.5–1.5% of purchase price in California once the seller has covered the reports. Loan points are not here — they live under Financing." />
+
+          {/* ---------------------------------------------- holding */}
+          <Band span={4} tag={`${money0(rBase.holdMonthly)}/mo`}>Holding costs</Band>
+          <R label="Levied property tax rate" unit="%"
+            note="1% Prop 13 base plus voter-approved bonds. Do not use a published “average effective rate” — those are dragged under 1% by long-held basis and would understate this deal by about a third.">
+            <Num value={s.taxRatePct} onChange={v => set('taxRatePct', v)} /></R>
+          <R label="Prior assessed value"
+            note="From the county assessor, optional. Only used to break out the supplemental bill — the separate one for the gap between the seller’s roll value and what you paid.">
+            <Money value={s.priorAssessed} onChange={v => set('priorAssessed', v)} /></R>
+          <R label="Builder's risk insurance"
+            note="Covers the structure while it is torn open. Roughly 1–3% of the rehab budget for the project, or $150–300/mo." ctl={
+            <div className="inline-input" style={{ justifyContent: 'flex-end' }}>
+              <NumInput fmt="raw" small value={s.builderRisk} onChange={v => set('builderRisk', v)} />
+              <UnitToggle options={[{ u: '$', label: '$/mo' }, { u: '%', label: '% rehab' }]}
+                value={s.builderRiskUnit} onChange={u => set('builderRiskUnit', u as '$' | '%')} />
+            </div>} />
+          <Sec span={4}>Monthly operating — enter $/mo, total at right</Sec>
+          {HOLD_ITEMS.map(i => (
+            <R key={i.id} label={i.label} note={i.note} unit={money0((s.hold[i.id] ?? 0) * rBase.holdMonths)}>
+              <Money value={s.hold[i.id] ?? 0} onChange={v => setMap('hold', i.id, v)} /></R>
+          ))}
+          <V label="Property tax — reassessed" value={money0(rBase.propertyTax)} unit="auto"
+            note="Prop 13 resets assessed value to your purchase price at close. The seller’s old bill is irrelevant." />
+          {rBase.supplementalTax > 0 &&
+            <V label="of which supplemental bill" value={money0(rBase.supplementalTax)} unit="incl."
+              note="Arrives weeks to months after close and catches most first-time flippers by surprise." />}
+          <V cls="tot" label={`Total over ${rBase.holdMonths.toFixed(1)} months`} value={money0(rBase.holdTotal)}
+            note={<>About {pct(s.arv.base > 0 ? rBase.holdTotal / s.arv.base * 100 : 0)} of ARV. Small next to
+              rehab, but it runs whether or not anyone is working on the house.</>} />
+
+          {/* ---------------------------------------------- selling */}
+          <Band span={4} tag={`${pct(rBase.sellPctOfSale)} of sale`}>Selling costs</Band>
+          <G>All-in Bay Area selling costs run <b>7–9% of sale price</b>. Yours are {pct(rBase.sellPctOfSale)} — {sellVerdict}.
+            If you list the property yourself, the listing commission below is income to you rather than a cost —
+            this model does not yet net that off.</G>
+          <R label="Listing commission" unit="%"
+            note="2.5% is standard in the Bay Area. Your own listing side is income, not an expense.">
+            <Num value={s.listCommPct} onChange={v => set('listCommPct', v)} /></R>
+          <R label="Buyer agent commission" unit="%"
+            note="Negotiable since the NAR settlement, but 2.5% is still what it takes to get shown in most Bay Area neighbourhoods.">
+            <Num value={s.buyCommPct} onChange={v => set('buyCommPct', v)} /></R>
+          <R label="City transfer tax paid by"
+            note={city
+              ? `${city.name} custom is pre-filled, but on a large bill this is genuinely negotiable — override it per deal.`
+              : "Local custom varies. Pick a city above to pre-fill it."} ctl={
+            <UnitToggle
+              options={[{ u: 'seller', label: 'Seller' }, { u: 'split', label: 'Split' }, { u: 'buyer', label: 'Buyer' }]}
+              value={s.transferPayer}
+              onChange={u => set('transferPayer', u as FlipState['transferPayer'])} />} />
+          {SELL_FLAT_ITEMS.map(i => (
+            <R key={i.id} label={i.label} note={i.note}>
+              <Money value={s.sell[i.id] ?? 0} onChange={v => setMap('sell', i.id, v)} /></R>
+          ))}
+          <R label="Staging — per month"
+            note="$1–1.5k/mo on top of setup, running through days on market plus escrow.">
+            <Money value={s.stagingMo} onChange={v => set('stagingMo', v)} /></R>
+          <R label="Retrofit compliance"
+            note={city
+              ? `Required in ${city.name}: ${city.retrofit.map(x => x.label).join(', ')}.`
+              : "Sewer lateral certificate, water heater strapping, smoke and CO alarms, seismic gas shutoff — which apply depends on the city."}>
+            <Money value={s.retrofit} onChange={v => set('retrofit', v)} /></R>
+          <R label="Seller concessions" unit="%"
+            note="Credits you give back after the buyer’s inspection. 0.5% is a light assumption; 1% is safer on an older house.">
+            <Num value={s.concessionsPct} onChange={v => set('concessionsPct', v)} /></R>
+          <R label="CA 3.33% withholding"
+            note="Withheld at close and credited against the tax already modelled below. It moves cash timing, never profit — so it is deliberately not an expense here." ctl={
+            <Switch checked={s.withholdingOn} onChange={v => set('withholdingOn', v)} />} />
+          {rBase.sellLines.filter(l => l.derived && l.amount !== 0).map((l, i) => (
+            <V key={i} label={l.label} value={money0(l.amount)} note="Computed at base ARV." />
+          ))}
+          <V cls="tot" label="Total selling costs" value={money0(rBase.sellTotal)} unit={pct(rBase.sellPctOfSale)}
+            note="Recomputed for every ARV scenario, since most of these lines are percentages of sale price." />
+
+          {/* ---------------------------------------------- financing */}
+          <Band span={4} tag={s.finMode === 'hard' ? 'hard money' : (s.ltvPct > 0 ? 'conventional' : 'all cash')}>Financing</Band>
+          <G>Hard money finances the rehab and charges interest on a balance that grows with draws. A conventional
+            loan finances only the purchase and leaves the whole rehab to your cash — which is why switching
+            modes moves peak cash far more than it moves profit. <b>Set conventional LTV to 0 to model an
+            all-cash purchase.</b></G>
+          <R label="Instrument" note="Switching swaps the input set below rather than reinterpreting it." ctl={
+            <UnitToggle options={[{ u: 'hard', label: 'Hard money' }, { u: 'conv', label: 'Conventional' }]}
+              value={s.finMode} onChange={u => set('finMode', u as FlipState['finMode'])} />} />
+          {s.finMode === 'hard' ? <>
+            <R label="Loan-to-cost on purchase" unit="%"
+              note="Bay Area hard money runs 85–90% of purchase. The remainder is your down payment.">
+              <Num value={s.ltcPct} onChange={v => set('ltcPct', v)} /></R>
+            <R label="Rehab financed" unit="%"
+              note="Usually 100%, held back and released in draws as work is inspected. You front each draw and get reimbursed.">
+              <Num value={s.rehabFinancedPct} onChange={v => set('rehabFinancedPct', v)} /></R>
+            <R label="Interest rate" unit="%"
+              note="9.5–12% in 2026 depending on your track record and leverage. Interest-only, accrued on the drawn balance.">
+              <Num value={s.hardRate} onChange={v => set('hardRate', v)} /></R>
+            <R label="Points" unit="%"
+              note="1.5–3 points, charged at close on the total commitment — purchase loan plus the rehab holdback you have not drawn yet.">
+              <Num value={s.pointsPct} onChange={v => set('pointsPct', v)} /></R>
+            <R label="Lender fees" note="Underwriting, doc prep and legal. $1–2k is typical.">
+              <Money value={s.hardFees} onChange={v => set('hardFees', v)} /></R>
+            <R label="Draws / fee each" note="$250–500 per draw, plus an inspection delay each time. Fewer, larger draws cost less and move faster." ctl={
+              <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
+                <NumInput fmt="raw" small value={s.drawCount} onChange={v => set('drawCount', v)} />
+                <NumInput small value={s.drawFee} onChange={v => set('drawFee', v)} />
+              </div>} />
+            <R label="Minimum interest" unit="months"
+              note="Most lenders guarantee 3–6 months of interest even if you pay off early. Ask before you sign — it caps the value of a fast flip.">
+              <Num value={s.minInterestMonths} onChange={v => set('minInterestMonths', v)} /></R>
+            <R label="Extension fee" unit="%"
+              note="Charged when the schedule overrun above is more than zero. Typically 0.5–1 point to extend.">
+              <Num value={s.extensionFeePct} onChange={v => set('extensionFeePct', v)} /></R>
+          </> : <>
+            <R label="Loan-to-value on purchase" unit="%"
+              note="Investment-property LTV, against purchase price rather than total cost. Set to 0 for all cash.">
+              <Num value={s.ltvPct} onChange={v => set('ltvPct', v)} /></R>
+            <R label="Interest rate" unit="%"
+              note="Investment property prices 50–75bp over owner-occupied.">
+              <Num value={s.convRate} onChange={v => set('convRate', v)} /></R>
+            <R label="Term" unit="years" note="Sets the payment. The loan is paid off at sale regardless.">
+              <Num value={s.convTerm} onChange={v => set('convTerm', v)} /></R>
+            <R label="Interest only"
+              note="If the product offers it, take it on a flip — amortising just parks your cash in principal you get back at close." ctl={
+              <Switch checked={s.convIO} onChange={v => set('convIO', v)} />} />
+            <R label="Origination" unit="%" note="On the loan amount only — there is no rehab commitment to charge against.">
+              <Num value={s.originationPct} onChange={v => set('originationPct', v)} /></R>
+            <R label="Lender fees" note="Underwriting, appraisal review, doc prep.">
+              <Money value={s.convFees} onChange={v => set('convFees', v)} /></R>
+            <R label="Prepayment penalty" unit="%"
+              note="Some investor products carry one, and a flip pays off inside the window by definition. Check before you sign.">
+              <Num value={s.prepayPct} onChange={v => set('prepayPct', v)} /></R>
+          </>}
+          {rBase.finLines.filter(l => l.amount !== 0).map((l, i) => (
+            <V key={i} label={l.label} value={money0(l.amount)} note={l.hint} />
+          ))}
+          <V cls="tot" label="Total financing cost" value={money0(rBase.finTotal)}
+            note={<>{pct(s.arv.base > 0 ? rBase.finTotal / s.arv.base * 100 : 0)} of ARV. After rehab this is
+              usually the second-largest cost in a leveraged flip.</>} />
+          <V label="Loan at close" value={money0(rBase.loanAtClose)} />
+          <V label="Down payment" value={money0(rBase.downPayment)} />
+          <V label="Cash needed for rehab" value={money0(rBase.cashForRehab)}
+            note={s.finMode === 'conv'
+              ? "The whole rehab, because a conventional purchase loan funds none of it."
+              : "Only the unfinanced share — the lender reimburses the rest through draws."} />
+          <V cls="grand" label="Peak cash out of pocket" value={money0(rBase.peakCash)}
+            note="The number that decides whether you can actually do this deal, regardless of how good the return looks." />
+
+          {/* ---------------------------------------------- tax */}
+          <Band span={4}>Tax &amp; thresholds</Band>
+          <R label="Blended tax rate" unit="%"
+            note="Flip profit is ordinary income and likely dealer property — no capital gains treatment and no 1031. 40–50% combined federal and California is typical at a full-time flipper’s income.">
+            <Num value={s.taxPct} onChange={v => set('taxPct', v)} /></R>
+          <R label="A loss shelters other income"
+            note="Off by default so a bad deal shows its full loss. Turn it on only if you genuinely have other income for the loss to offset." ctl={
+            <Switch checked={s.lossOffsetsIncome} onChange={v => set('lossOffsetsIncome', v)} />} />
+          <R label="Minimum profit"
+            note="$50–75k is a common Bay Area floor. Below that the risk is not being paid for — and this is what the max allowable offer solves against.">
+            <Money value={s.minProfit} onChange={v => set('minProfit', v)} /></R>
+          <R label="Floor is measured"
+            note="Pre-tax is the number most flippers quote each other; after-tax is the number that reaches your account." ctl={
+            <UnitToggle options={[{ u: 'after', label: 'after tax' }, { u: 'pre', label: 'pre-tax' }]}
+              value={s.minProfitBasis} onChange={u => set('minProfitBasis', u as 'after' | 'pre')} />} />
+        </tbody></table></div>
+
+        {diverged && (
+          <div className="notice warn" style={{ marginTop: 12 }}>
+            <div><b>Checklist and budget have diverged</b>
+              Checklist says {money0(checklist.base)} base; this deal uses {money0(s.rehab.base)}.</div>
+            <div className="act">
+              <button onClick={pushChecklist}>Re-sync</button>
+              <button onClick={() => set('rehabSource', 'manual')}>Keep mine</button>
+            </div>
           </div>
-
-          <div>
-            <div className="sheet"><table className="ss"><tbody>
-              <Band tag={money0(rBase.acqTotal)}>Acquisition costs</Band>
-              {ACQ_ITEMS.map(i => (
-                <R key={i.id} label={i.label} hint={i.hint}>
-                  <Money value={s.acq[i.id] ?? 0} onChange={v => setMap('acq', i.id, v)} /></R>
-              ))}
-              {rBase.acqLines.filter(l => l.derived && l.amount !== 0).map((l, i) => (
-                <V key={i} label={l.label} value={money0(l.amount)} unit="auto" />
-              ))}
-              <V cls="tot" label="Total acquisition" value={money0(rBase.acqTotal)}
-                unit={pct(s.price > 0 ? rBase.acqTotal / s.price * 100 : 0)} />
-            </tbody></table></div>
-
-            <div className="sheet"><table className="ss"><tbody>
-              <Band tag={`${money0(rBase.holdMonthly)}/mo`}>Holding costs</Band>
-              <R label="Levied property tax rate"
-                hint="1% Prop 13 base plus local bonds — not an “effective” rate" unit="%">
-                <Num value={s.taxRatePct} onChange={v => set('taxRatePct', v)} /></R>
-              <R label="Prior assessed value" hint="optional — breaks out the supplemental bill">
-                <Money value={s.priorAssessed} onChange={v => set('priorAssessed', v)} /></R>
-              <R label="Builder&apos;s risk insurance" ctl={
-                <div className="inline-input" style={{ justifyContent: 'flex-end' }}>
-                  <NumInput fmt="raw" small value={s.builderRisk} onChange={v => set('builderRisk', v)} />
-                  <UnitToggle options={[{ u: '$', label: '$/mo' }, { u: '%', label: '% rehab' }]}
-                    value={s.builderRiskUnit} onChange={u => set('builderRiskUnit', u as '$' | '%')} />
-                </div>} />
-              <Sec>Monthly operating — enter $/mo, total at right</Sec>
-              {HOLD_ITEMS.map(i => (
-                <R key={i.id} label={i.label} hint={i.hint} unit={money0((s.hold[i.id] ?? 0) * rBase.holdMonths)}>
-                  <Money value={s.hold[i.id] ?? 0} onChange={v => setMap('hold', i.id, v)} /></R>
-              ))}
-              <Sec>Over the hold period</Sec>
-              <V label="Property tax — reassessed" value={money0(rBase.propertyTax)} unit="auto" />
-              {rBase.supplementalTax > 0 &&
-                <V label="of which supplemental bill" value={money0(rBase.supplementalTax)} unit="incl." />}
-              <V label="Builder&apos;s risk"
-                value={money0(rBase.holdTotal - rBase.propertyTax - rBase.holdMonthly * rBase.holdMonths)} />
-              <V label={`Operating — ${money0(rBase.holdMonthly)}/mo`}
-                value={money0(rBase.holdMonthly * rBase.holdMonths)} />
-              <V cls="tot" label={`Total over ${rBase.holdMonths.toFixed(1)} months`} value={money0(rBase.holdTotal)} />
-            </tbody></table></div>
-
-            <div className="sheet"><table className="ss"><tbody>
-              <Band tag={`${pct(rBase.sellPctOfSale)} of sale`}>Selling costs</Band>
-              <R label="Listing commission" unit="%">
-                <Num value={s.listCommPct} onChange={v => set('listCommPct', v)} /></R>
-              <R label="Buyer agent commission" hint="negotiable or zero post-settlement" unit="%">
-                <Num value={s.buyCommPct} onChange={v => set('buyCommPct', v)} /></R>
-              <R label="City transfer tax paid by"
-                hint={city ? `${city.name} custom — override per deal` : undefined} ctl={
-                <UnitToggle
-                  options={[{ u: 'seller', label: 'Seller' }, { u: 'split', label: 'Split' }, { u: 'buyer', label: 'Buyer' }]}
-                  value={s.transferPayer}
-                  onChange={u => set('transferPayer', u as FlipState['transferPayer'])} />} />
-              {SELL_FLAT_ITEMS.map(i => (
-                <R key={i.id} label={i.label}>
-                  <Money value={s.sell[i.id] ?? 0} onChange={v => setMap('sell', i.id, v)} /></R>
-              ))}
-              <R label="Staging — per month" hint="runs over DOM plus escrow">
-                <Money value={s.stagingMo} onChange={v => set('stagingMo', v)} /></R>
-              <R label="Retrofit compliance"
-                hint={city ? city.retrofit.map(x => x.label).join(' · ') : 'lateral, strapping, alarms'}>
-                <Money value={s.retrofit} onChange={v => set('retrofit', v)} /></R>
-              <R label="Seller concessions" unit="%">
-                <Num value={s.concessionsPct} onChange={v => set('concessionsPct', v)} /></R>
-              <R label="CA 3.33% withholding" hint="cash-flow timing, never an expense" ctl={
-                <Switch checked={s.withholdingOn} onChange={v => set('withholdingOn', v)} />} />
-              <Sec>Computed at base ARV</Sec>
-              {rBase.sellLines.filter(l => l.derived && l.amount !== 0).map((l, i) => (
-                <V key={i} label={l.label} value={money0(l.amount)} />
-              ))}
-              <V cls="tot" label="Total selling costs" value={money0(rBase.sellTotal)}
-                unit={pct(rBase.sellPctOfSale)} />
-            </tbody></table></div>
-
-            <div className="sheet"><table className="ss"><tbody>
-              <Band tag={s.finMode === 'hard' ? 'hard money' : (s.ltvPct > 0 ? 'conventional' : 'all cash')}>Financing</Band>
-              <R label="Instrument" ctl={
-                <UnitToggle options={[{ u: 'hard', label: 'Hard money' }, { u: 'conv', label: 'Conventional' }]}
-                  value={s.finMode} onChange={u => set('finMode', u as FlipState['finMode'])} />} />
-              {s.finMode === 'hard' ? <>
-                <R label="Loan-to-cost on purchase" unit="%"><Num value={s.ltcPct} onChange={v => set('ltcPct', v)} /></R>
-                <R label="Rehab financed" hint="released in draws over the rehab" unit="%">
-                  <Num value={s.rehabFinancedPct} onChange={v => set('rehabFinancedPct', v)} /></R>
-                <R label="Interest rate" unit="%"><Num value={s.hardRate} onChange={v => set('hardRate', v)} /></R>
-                <R label="Points" hint="on purchase loan plus rehab holdback" unit="%">
-                  <Num value={s.pointsPct} onChange={v => set('pointsPct', v)} /></R>
-                <R label="Lender fees"><Money value={s.hardFees} onChange={v => set('hardFees', v)} /></R>
-                <R label="Draws / fee each" ctl={
-                  <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
-                    <NumInput fmt="raw" small value={s.drawCount} onChange={v => set('drawCount', v)} />
-                    <NumInput small value={s.drawFee} onChange={v => set('drawFee', v)} />
-                  </div>} />
-                <R label="Minimum interest" unit="months">
-                  <Num value={s.minInterestMonths} onChange={v => set('minInterestMonths', v)} /></R>
-                <R label="Extension fee" hint="charged when overrun is above zero" unit="%">
-                  <Num value={s.extensionFeePct} onChange={v => set('extensionFeePct', v)} /></R>
-              </> : <>
-                <R label="Loan-to-value on purchase" hint="set to 0 for an all-cash purchase" unit="%">
-                  <Num value={s.ltvPct} onChange={v => set('ltvPct', v)} /></R>
-                <R label="Interest rate" unit="%"><Num value={s.convRate} onChange={v => set('convRate', v)} /></R>
-                <R label="Term" unit="years"><Num value={s.convTerm} onChange={v => set('convTerm', v)} /></R>
-                <R label="Interest only" ctl={<Switch checked={s.convIO} onChange={v => set('convIO', v)} />} />
-                <R label="Origination" unit="%"><Num value={s.originationPct} onChange={v => set('originationPct', v)} /></R>
-                <R label="Lender fees"><Money value={s.convFees} onChange={v => set('convFees', v)} /></R>
-                <R label="Prepayment penalty" unit="%"><Num value={s.prepayPct} onChange={v => set('prepayPct', v)} /></R>
-              </>}
-              <Sec>Computed at base case</Sec>
-              {rBase.finLines.filter(l => l.amount !== 0).map((l, i) => (
-                <V key={i} label={l.label} value={money0(l.amount)} />
-              ))}
-              <V cls="tot" label="Total financing cost" value={money0(rBase.finTotal)} />
-              <V label="Loan at close" value={money0(rBase.loanAtClose)} />
-              <V label="Down payment" value={money0(rBase.downPayment)} />
-              <V label="Cash needed for rehab" value={money0(rBase.cashForRehab)} />
-              <V cls="grand" label="Peak cash out of pocket" value={money0(rBase.peakCash)} />
-            </tbody></table></div>
-            {s.finMode === 'conv' && (
-              <div className="notice">
-                <div><b>Rehab is unfinanced in this mode</b>
-                  A conventional purchase loan funds no rehab, so the whole {money0(rBase.rehabTotal)} budget is
-                  cash. Principal repaid during the hold is a balance transfer, not an expense — it raises peak
-                  cash and returns as a smaller payoff.</div>
-              </div>
-            )}
+        )}
+        {checklist.checkedCount > 0 && s.rehabSource === 'manual' && (
+          <div className="notice" style={{ marginTop: 12 }}>
+            <div><b>{checklist.checkedCount} items checked on the checklist</b>
+              They total {money0(checklist.base)} at base.</div>
+            <div className="act"><button onClick={pushChecklist}>Use these</button></div>
           </div>
-        </div>
+        )}
       </section>
 
       {/* ============================================ TAB 2 — DEAL MODEL */}
