@@ -14,6 +14,10 @@ const CARDS = [
     desc: 'Bay Area fix-and-flip underwriting — a rehab × ARV scenario grid, a profit sensitivity heatmap, city transfer tax presets, and a trade-by-trade cost checklist that builds your scope of work.',
   },
   {
+    href: '/renovations', ic: '📖', title: 'Renovation Guide',
+    desc: 'What 50 common renovations actually cost in the Bay Area — unit prices, whole-job ranges, permit requirements, and what catches people out on each one.',
+  },
+  {
     href: '/portfolio', ic: '📊', title: 'Portfolio ROE Dashboard',
     desc: 'Every rental you own in one view — cash-on-cash, return on equity, a performance leaderboard, and lazy-equity alerts.',
   },

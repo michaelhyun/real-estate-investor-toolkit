@@ -13,6 +13,8 @@ export const TOOLS = [
     desc: 'Payment breakdown, amortization & extra-payment savings' },
   { id: 'flip', name: 'Flip Analyzer', href: '/flip',
     desc: 'Scenarios, sensitivity & a trade-by-trade rehab checklist' },
+  { id: 'renovations', name: 'Renovation Guide', href: '/renovations',
+    desc: 'What 50 common Bay Area renovations actually cost' },
   { id: 'portfolio', name: 'Portfolio ROE Dashboard', href: '/portfolio',
     desc: 'Equity, cash flow & return on equity across your rentals' },
 ];

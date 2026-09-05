@@ -6,4 +6,5 @@ export * from './sync';
 export * from './bayAreaCities';
 export * from './flip';
 export * from './sow';
+export * from './renovations';
 export * from './market';

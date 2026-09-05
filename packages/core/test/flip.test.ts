@@ -14,6 +14,9 @@ import {
   buildSpaces, computeSow, applyLevel, taskKey, taskQty, priceKey, SPACE_DEFS, DEF_BY_KIND,
   type PropertyShape,
 } from '../src/sow';
+import {
+  RENOVATIONS, RENO_CATEGORIES, searchRenovations, countByCategory,
+} from '../src/renovations';
 
 const base = (over: Partial<FlipState> = {}): FlipState => ({ ...defaultFlipState(), ...over });
 const near = (a: number, b: number, tol = 0.5) => expect(Math.abs(a - b)).toBeLessThan(tol);
@@ -527,5 +530,87 @@ describe('city presets', () => {
   it('an unknown city slug falls back to county rate only', () => {
     expect(findCity('nowhere')).toBeNull();
     near(cityTransferTax(findCity('nowhere'), 1_000_000), 0);
+  });
+});
+
+describe('renovation guide', () => {
+  it('holds exactly fifty renovations', () => {
+    expect(RENOVATIONS).toHaveLength(50);
+  });
+
+  it('every id is unique', () => {
+    const ids = RENOVATIONS.map(i => i.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('every entry is fully written — no placeholder rows', () => {
+    for (const i of RENOVATIONS) {
+      expect(i.name.length).toBeGreaterThan(3);
+      expect(i.unit.length).toBeGreaterThan(0);
+      expect(i.days.length).toBeGreaterThan(0);
+      /* the two note fields are the reason this guide exists */
+      expect(i.drivers.length).toBeGreaterThan(40);
+      expect(i.watch.length).toBeGreaterThan(40);
+    }
+  });
+
+  it('every range runs low to high, and project totals cover the unit cost', () => {
+    for (const i of RENOVATIONS) {
+      expect(i.unitLow).toBeGreaterThan(0);
+      expect(i.unitHigh).toBeGreaterThan(i.unitLow);
+      expect(i.projectLow).toBeGreaterThan(0);
+      expect(i.projectHigh).toBeGreaterThan(i.projectLow);
+      /* a whole job can never come to less than one unit of itself */
+      expect(i.projectHigh).toBeGreaterThanOrEqual(i.unitHigh);
+    }
+  });
+
+  it('every category is represented and every entry lands in a known one', () => {
+    const counts = countByCategory();
+    for (const c of RENO_CATEGORIES) expect(counts[c] ?? 0).toBeGreaterThan(0);
+    for (const i of RENOVATIONS) expect(RENO_CATEGORIES).toContain(i.category);
+  });
+
+  it('searches names, categories and both note fields', () => {
+    expect(searchRenovations('countertop', 'all').map(i => i.id)).toContain('countertops');
+    expect(searchRenovations('kitchen', 'all').length).toBeGreaterThan(3);
+    /* the notes are searchable, which is how someone finds the warning they
+       half-remember rather than the renovation they already know the name of */
+    expect(searchRenovations('asbestos', 'all').map(i => i.id)).toContain('popcorn');
+    expect(searchRenovations('PG&E', 'all').map(i => i.id)).toContain('panel-upgrade');
+    expect(searchRenovations('Earthquake Brace', 'all').map(i => i.id)).toContain('seismic-retrofit');
+  });
+
+  it('filters by category, and combines with the query', () => {
+    const kitchen = searchRenovations('', 'Kitchen');
+    expect(kitchen.length).toBeGreaterThan(3);
+    expect(kitchen.every(i => i.category === 'Kitchen')).toBe(true);
+    expect(searchRenovations('cabinet', 'Kitchen').length).toBeGreaterThan(0);
+    expect(searchRenovations('cabinet', 'Plumbing')).toEqual([]);
+  });
+
+  it('an empty query returns everything', () => {
+    expect(searchRenovations('   ', 'all')).toHaveLength(50);
+  });
+
+  it('agrees with the scope of work on the renovations they both price', () => {
+    /* The guide and the estimator are separate datasets written for different
+       jobs. Where they name the same work they must not contradict each other,
+       or one of the two is teaching the wrong number. */
+    const pairs: [string, string, string][] = [
+      ['countertops', 'kitchen', 'counter'],
+      ['ev-charger', 'garage', 'ev'],
+      ['panel-upgrade', 'electrical', 'panel'],
+      ['sewer-lateral', 'plumbing', 'lateral'],
+      ['water-heater', 'plumbing', 'wh'],
+      ['seismic-retrofit', 'structural', 'seismic'],
+      ['furnace', 'hvac', 'furnace'],
+    ];
+    for (const [renoId, kind, taskId] of pairs) {
+      const g = RENOVATIONS.find(i => i.id === renoId)!;
+      const t = DEF_BY_KIND[kind].tasks.find(x => x.id === taskId)!;
+      expect(t.cost).toBeGreaterThanOrEqual(g.unitLow);
+      expect(t.cost).toBeLessThanOrEqual(g.unitHigh);
+    }
   });
 });

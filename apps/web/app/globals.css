@@ -1148,3 +1148,110 @@ table.pf tr.strong td:first-child { background:#fbfaf7; }
   .sow-foot .push, .cl-sticky .push { margin-left:0; flex-basis:100%; }
   .sow-foot .push .btn, .cl-sticky .push .btn { flex:1; }
 }
+
+/* ============================================================
+   Renovation Guide
+
+   A reference, so it reads like one: notes always visible, search and category
+   filter keeping the list short enough for that to stay true.
+   ============================================================ */
+
+.rg-count {
+  font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+  background:var(--card); border:1px solid var(--line); border-radius:99px; padding:4px 12px;
+}
+.rg-intro { max-width:70ch; font-size:13.5px; color:var(--ink-soft); line-height:1.6; margin:0 0 18px; }
+.rg-intro em { font-style:normal; font-family:var(--mono); font-size:12.5px; color:var(--ink); }
+
+.rg-controls { margin-bottom:16px; }
+.rg-search {
+  width:100%; max-width:520px; font-family:var(--sans); font-size:14px;
+  padding:9px 13px; border:1px solid var(--line-strong); border-radius:9px;
+  background:var(--card); color:var(--ink); margin-bottom:10px;
+}
+.rg-search:focus { outline:2px solid var(--accent); outline-offset:-1px; border-color:var(--accent); }
+.rg-search::placeholder { color:var(--ink-faint); }
+
+.rg-cats { display:flex; flex-wrap:wrap; gap:6px; }
+.rg-chip {
+  font-family:var(--sans); font-size:12px; font-weight:600; cursor:pointer;
+  padding:5px 11px; border-radius:99px; border:1px solid var(--line-strong);
+  background:var(--card); color:var(--ink-soft); white-space:nowrap;
+}
+.rg-chip span { font-family:var(--mono); font-size:10px; color:var(--ink-faint); margin-left:5px; }
+.rg-chip:hover { border-color:var(--accent); color:var(--accent-strong); }
+.rg-chip.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.rg-chip.on span { color:rgba(255,255,255,.75); }
+
+.rg-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(400px, 1fr)); gap:12px; }
+
+.rg-card {
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow); padding:13px 15px 14px; display:flex; flex-direction:column;
+}
+.rg-card header { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:6px; }
+.rg-cat {
+  font-family:var(--mono); font-size:9.5px; font-weight:700; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--accent-strong); background:var(--accent-soft);
+  border-radius:3px; padding:2px 7px;
+}
+.rg-tag {
+  font-family:var(--mono); font-size:9px; font-weight:600; letter-spacing:.05em;
+  text-transform:uppercase; border-radius:3px; padding:2px 7px; color:var(--ink-soft);
+  background:var(--paper); border:1px solid var(--line);
+}
+.rg-tag.permit-yes { background:var(--warn-soft); color:var(--warn); border-color:transparent; }
+.rg-tag.resale-high { background:var(--accent-soft); color:var(--accent-strong); border-color:transparent; }
+.rg-tag.resale-low { background:var(--neg-soft); color:var(--neg); border-color:transparent; }
+.rg-card h3 {
+  font-family:var(--display); font-size:16px; font-weight:600; letter-spacing:-.01em;
+  margin:0 0 9px; line-height:1.25;
+}
+
+.rg-nums {
+  display:grid; grid-template-columns:repeat(3, 1fr); gap:0;
+  border:1px solid var(--line); border-radius:7px; overflow:hidden; margin-bottom:10px;
+}
+.rg-nums > div { padding:6px 9px 7px; border-right:1px solid var(--line); }
+.rg-nums > div:last-child { border-right:none; }
+.rg-nums .k {
+  display:block; font-family:var(--mono); font-size:9px; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--ink-faint);
+}
+.rg-nums .v {
+  display:block; font-family:var(--mono); font-size:13.5px; font-weight:700;
+  letter-spacing:-.02em; margin-top:1px; font-variant-numeric:tabular-nums;
+}
+.rg-nums .v.small { font-size:11.5px; font-weight:600; }
+.rg-nums.two { grid-template-columns:1.35fr 1fr; }
+.rg-nums .s { display:block; font-size:9.5px; color:var(--ink-faint); margin-top:1px; }
+
+.rg-note { font-size:12px; line-height:1.5; color:var(--ink-soft); margin:0 0 6px; max-width:none; }
+.rg-note:last-child { margin-bottom:0; }
+.rg-note b {
+  display:block; font-family:var(--mono); font-size:9px; font-weight:700; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--ink-faint); margin-bottom:1px;
+}
+.rg-note.watch { border-left:2px solid var(--warn); padding-left:9px; }
+.rg-note.watch b { color:var(--warn); }
+
+.rg-empty {
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+  padding:26px 20px; text-align:center; color:var(--ink-soft); font-size:14px;
+}
+.rg-reset {
+  font-family:var(--sans); font-size:14px; font-weight:600; color:var(--accent-strong);
+  background:none; border:none; cursor:pointer; text-decoration:underline; padding:0 4px;
+}
+
+@media (max-width: 900px) { .rg-list { grid-template-columns:1fr; } }
+@media (max-width: 700px) {
+  .rg-intro { font-size:12.5px; }
+  .rg-card { padding:11px 12px 12px; }
+  .rg-card h3 { font-size:15px; }
+  .rg-nums, .rg-nums.two { grid-template-columns:1fr 1fr; }
+  .rg-nums > div:nth-child(2) { border-right:none; }
+  .rg-nums > div:nth-child(3) { grid-column:1 / -1; border-top:1px solid var(--line); }
+  .rg-cats { gap:5px; }
+  .rg-chip { font-size:11.5px; padding:5px 9px; }
+}
