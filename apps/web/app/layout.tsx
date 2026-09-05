@@ -1,12 +1,16 @@
 import type { Metadata } from 'next';
-import { Fraunces, Public_Sans, Spline_Sans_Mono } from 'next/font/google';
+import { Public_Sans } from 'next/font/google';
 import './globals.css';
 import { Shell } from '../components/Shell';
 import { AuthProvider } from '../components/auth';
 
-const display = Fraunces({ subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-display' });
-const sans = Public_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-sans' });
-const mono = Spline_Sans_Mono({ subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-mono' });
+/* One family, as the design system specifies. Figures are set in it too, with
+   tabular-nums — mono is reserved for code and appears nowhere in the UI. */
+const sans = Public_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-public-sans',
+});
 
 export const metadata: Metadata = {
   title: 'Real Estate Investor Toolkit',
@@ -16,13 +20,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
+    <html lang="en" className={sans.variable}>
       <body>
         <AuthProvider>
-          <div className="wrap">
-            <Shell />
-            {children}
-          </div>
+          <Shell>{children}</Shell>
         </AuthProvider>
       </body>
     </html>
