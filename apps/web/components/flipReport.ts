@@ -47,7 +47,7 @@ export function buildFlipReport(s: FlipState): string {
   <div class="meta">${escapeHtml(title(s))}${city ? ' &nbsp;·&nbsp; ' + escapeHtml(city.name) : ''} &nbsp;·&nbsp; Prepared ${today()}</div>
 </header>
 
-<div class="verdict">${escapeHtml(v.title)} — ${money(r.netProfit)} net profit · ${r.roi.toFixed(1)}% ROI · ${r.annualizedRoi.toFixed(1)}% annualized</div>
+<div class="verdict">${escapeHtml(v.title)} — ${money(r.profit)} net profit · ${r.roi.toFixed(1)}% ROI · ${r.annualizedRoi.toFixed(1)}% annualized</div>
 
 <h2>The deal</h2>
 <table>
@@ -73,16 +73,14 @@ export function buildFlipReport(s: FlipState): string {
   <tr><td>Less rehab budget</td><td class="r">(${money0(r.rehabTotal)})</td></tr>
   <tr><td>Less holding costs</td><td class="r">(${money0(r.holdTotal)})</td></tr>
   <tr><td>Less financing</td><td class="r">(${money0(r.finTotal)})</td></tr>
-  <tr class="total"><td>Pre-tax profit</td><td class="r">${money(r.preTaxProfit)}</td></tr>
-  <tr><td>Less income tax at ${s.taxPct}%</td><td class="r">(${money0(r.tax)})</td></tr>
-  <tr class="total"><td>Net profit after tax</td><td class="r">${money(r.netProfit)}</td></tr>
+  <tr class="total"><td>Net profit</td><td class="r">${money(r.profit)}</td></tr>
 </table>
 
 <h2>Scenarios — the three ARV cases</h2>
 <table class="grid-tbl">
   <tr><th></th>${SCENARIO_KEYS.map(k =>
     `<th>ARV ${k}<br><span class="s">${money0(s.arv[k])}</span></th>`).join('')}</tr>
-  ${scenarioRow('Net profit after tax', c => money(c.netProfit))}
+  ${scenarioRow('Net profit', c => money(c.profit))}
   ${scenarioRow('Return on cash', c => c.roi.toFixed(1) + '%')}
   ${scenarioRow('Annualized', c => c.annualizedRoi.toFixed(1) + '%')}
   ${scenarioRow('Peak cash', c => money0(c.peakCash))}
@@ -114,7 +112,7 @@ export function buildFlipReport(s: FlipState): string {
 
 <p class="note">Screening estimate only — verify every figure locally before making an offer.
 ${city ? `Transfer tax and property tax rates for ${escapeHtml(city.name)} as verified ${escapeHtml(city.verifiedOn)}; rates change by ballot measure, so confirm before relying on them. ` : ''}
-Property tax assumes Prop 13 reassessment to the purchase price. Flip profit is treated as ordinary income at a single blended rate, not capital gains.</p>
+Property tax assumes Prop 13 reassessment to the purchase price. Every profit figure here is before income tax.</p>
 </body></html>`;
 }
 

@@ -41,6 +41,9 @@ const cloud = dealStore<FlipState>('flip');
 
 type TabId = 'assumptions' | 'model' | 'sow';
 
+/* the foldable sections of the assumptions sheet, in the order they appear */
+const ASSUM_SECS = ['prop', 'value', 'rehab', 'time', 'acq', 'hold', 'sell', 'fin'];
+
 /* ------------------------------------------------------------ normalization */
 
 function normalizeFlip(d: any): FlipState {
@@ -59,10 +62,11 @@ function normalizeFlip(d: any): FlipState {
     rehabDays: d.rehabDays ?? (d.rehabMonths !== undefined ? Math.round(d.rehabMonths * 30.4375) : base.rehabDays),
     overrunDays: d.overrunDays ?? (d.overrunMonths !== undefined ? Math.round(d.overrunMonths * 30.4375) : base.overrunDays),
     buyerCommPct: d.buyerCommPct ?? d.buyCommPct ?? base.buyerCommPct,
-    /* the floor is pre-tax now; a deal saved with an after-tax floor is
-       converted so it still means the same thing */
+    /* The floor is a plain pre-tax number now. A deal saved back when the
+       floor could be stated after tax is grossed up at the rate that deal
+       carried, so it still means what it meant when it was typed. */
     minProfit: d.minProfitBasis === 'after' && d.minProfit
-      ? Math.round(d.minProfit / (1 - (d.taxPct ?? base.taxPct) / 100))
+      ? Math.round(d.minProfit / (1 - (d.taxPct ?? 45) / 100))
       : (d.minProfit ?? base.minProfit),
     sellerDisclosure: d.sellerDisclosure ?? base.sellerDisclosure,
     buySideCommPct: d.buySideCommPct ?? base.buySideCommPct,
@@ -115,8 +119,22 @@ const psf = (v: number, sqft: number) => sqft > 0 ? `${money0(v / sqft)}/sf` : '
 
 /* ---------------------------------------------------- sheet row primitives */
 
-const Band = ({ children, tag, span = 3 }: { children: React.ReactNode; tag?: string; span?: number }) => (
-  <tr className="band"><td colSpan={span}>{children}{tag && <span className="tag">{tag}</span>}</td></tr>
+/* A section header. Given `onToggle` it also folds the rows under it — the tag
+   holds that section's headline figure, so a shut section still reports the one
+   number you would have opened it for. */
+const Band = ({ children, tag, span = 3, open, onToggle }: {
+  children: React.ReactNode; tag?: React.ReactNode; span?: number;
+  open?: boolean; onToggle?: () => void;
+}) => (
+  <tr className={`band${onToggle ? ' fold' : ''}${onToggle && !open ? ' shut' : ''}`}>
+    <td colSpan={span} onClick={onToggle}
+      role={onToggle ? 'button' : undefined} tabIndex={onToggle ? 0 : undefined}
+      onKeyDown={onToggle ? ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onToggle(); } } : undefined}>
+      {onToggle && <span className="chev" aria-hidden />}
+      {children}
+      {tag && <span className="tag">{tag}</span>}
+    </td>
+  </tr>
 );
 const Sec = ({ children, span = 3 }: { children: React.ReactNode; span?: number }) => (
   <tr className="sec"><td colSpan={span}>{children}</td></tr>
@@ -200,6 +218,9 @@ export default function FlipPage() {
   const [catalogPrices, setCatalogPrices] = useState<Record<string, number>>({});
   const [tab, setTab] = useState<TabId>('assumptions');
   const [openSecs, setOpenSecs] = useState<Record<string, boolean>>({ 'kitchen-1': true });
+  /* Assumption sections fold shut. Stored as the exception — a section absent
+     from this map is open — so the page opens fully expanded. */
+  const [shutSecs, setShutSecs] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [savedDeals, setSavedDeals] = useState<FlipState[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -276,15 +297,19 @@ export default function FlipPage() {
     [spaces, s.checked, s.qty, catalogPrices, propShape]);
   const allOpen = spaces.length > 0 && spaces.every(sp => openSecs[sp.id]);
 
+  const secOpen = (id: string) => !shutSecs[id];
+  const fold = (id: string) => ({
+    open: secOpen(id),
+    onToggle: () => setShutSecs(p => ({ ...p, [id]: !p[id] })),
+  });
+  const allShut = ASSUM_SECS.every(id => shutSecs[id]);
+
   const rBase = useMemo(() => computeFlip(s, 'base'), [s]);
   /* rehab is one budget now, so the P&L compares the three ARV scenarios */
   const cols = useMemo(() => SCENARIO_KEYS.map(k => computeFlip(s, k)), [s]);
   const sens = useMemo(() => buildSensitivity(s, 7), [s]);
   const mao = useMemo(() => solveMAO(s), [s]);
   const verdict = verdictFor(rBase, s);
-  /* the grid shows profit after tax, so the pre-tax floor has to be converted
-     before it can colour those cells */
-  const floorAfterTax = s.minProfit * (1 - s.taxPct / 100);
 
   /* Screening benchmarks. These are rules of thumb, not rules — they exist so a
      number on screen carries a sense of whether it is normal for the Bay Area. */
@@ -448,7 +473,7 @@ export default function FlipPage() {
                     onClick={() => { setS(normalizeFlip(d)); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
                     <div>
                       <div className="dm-n">{dealTitle(d)}</div>
-                      <div className="dm-m">{money0(d.price)} · {money(dr.netProfit)} profit · {dr.roi.toFixed(0)}% ROI</div>
+                      <div className="dm-m">{money0(d.price)} · {money(dr.profit)} profit · {dr.roi.toFixed(0)}% ROI</div>
                     </div>
                     <button className="dm-del" title="Delete"
                       onClick={ev => { ev.stopPropagation(); deleteDeal(d.name); }}>✕</button>
@@ -469,7 +494,7 @@ export default function FlipPage() {
       <nav className="tabs">
         <button className={`tab${tab === 'assumptions' ? ' on' : ''}`} onClick={() => setTab('assumptions')}>Assumptions</button>
         <button className={`tab${tab === 'model' ? ' on' : ''}`} onClick={() => setTab('model')}>
-          Deal Model <span className="badge">{compact(rBase.netProfit)}</span></button>
+          Deal Model <span className="badge">{compact(rBase.profit)}</span></button>
         <button className={`tab${tab === 'sow' ? ' on' : ''}`} onClick={() => setTab('sow')}>
           Scope of Work <span className="badge">{sow.checkedCount ? money0(sow.total) : '0'}</span></button>
       </nav>
@@ -481,12 +506,14 @@ export default function FlipPage() {
         <div className="sumry">
           <div className="hero"><div className="k">Max offer</div>
             <div className="v">{money0(mao)}</div>
-            <div className="s">for {money0(s.minProfit)} pre-tax</div></div>
-          <div><div className="k">Pre-tax profit</div>
-            <div className={`v ${rBase.preTaxProfit < 0 ? 'neg' : rBase.preTaxProfit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.preTaxProfit)}</div>
+            <div className="s">for {money0(s.minProfit)} profit</div></div>
+          <div><div className="k">Net profit</div>
+            <div className={`v ${rBase.profit < 0 ? 'neg' : rBase.profit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.profit)}</div>
             <div className="s">at {money0(s.price)}</div></div>
-          <div><div className="k">After tax</div><div className="v">{money(rBase.netProfit)}</div>
-            <div className="s">{s.taxPct}% blended</div></div>
+          <div><div className="k">Profit floor</div><div className="v">{money0(s.minProfit)}</div>
+            <div className="s">{rBase.profit >= s.minProfit
+              ? `${money0(rBase.profit - s.minProfit)} of headroom`
+              : `${money0(s.minProfit - rBase.profit)} short`}</div></div>
           <div><div className="k">ROI · annual</div><div className="v">{pct(rBase.roi)}</div>
             <div className="s">{pct(rBase.annualizedRoi)} annualized</div></div>
           <div><div className="k">Peak cash</div><div className="v">{money0(rBase.peakCash)}</div>
@@ -506,6 +533,13 @@ export default function FlipPage() {
 
         {city?.note && <div className="notice warn"><div><b>{city.name}</b>{city.note}</div></div>}
 
+        <div className="sow-bar">
+          <button className="btn" onClick={() => setShutSecs(
+            allShut ? {} : Object.fromEntries(ASSUM_SECS.map(id => [id, true])))}>
+            {allShut ? 'Expand all' : 'Collapse all'}</button>
+          <span className="bar-note">Each section keeps its headline figure when shut.</span>
+        </div>
+
         <div className="sheet one"><table className="ss with-notes">
           {/* widths live in CSS, not inline, so the media queries can take them
               back on a narrow screen */}
@@ -515,7 +549,8 @@ export default function FlipPage() {
           </colgroup>
           <tbody>
 
-          <Band span={5} tag={`${pct(rBase.grossSpread)} gross spread`}>Property &amp; deal</Band>
+          <Band span={5} {...fold('prop')} tag={`${sqft.toLocaleString()} sf · ${s.prop.beds}bd / ${s.prop.baths}ba`}>Property &amp; deal</Band>
+          {secOpen('prop') && <>
           <R label="City" note="Swings hugely by city — most of San Mateo and Santa Clara sit at the county floor; Oakland and Berkeley do not." ctl={
             <select className="sel-city" value={s.citySlug} onChange={ev => applyCity(ev.target.value)}>
               <option value="">Not listed — enter rates manually</option>
@@ -541,8 +576,10 @@ export default function FlipPage() {
           <R label="Year built" note="Pre-1980 assume asbestos and lead; pre-1950 assume knob-and-tube and an unbolted foundation." ctl={
             <input className="num small" value={s.prop.year} autoComplete="off"
               onChange={ev => setProp('year', ev.target.value)} />} />
+          </>}
 
-          <Sec span={5}>Purchase &amp; after-repair value</Sec>
+          <Band span={5} {...fold('value')} tag={`${money0(s.arv.base - s.price)} spread · ${pct(rBase.grossSpread)}`}>Purchase &amp; after-repair value</Band>
+          {secOpen('value') && <>
           <R label="Purchase price" unit={psf(s.price, sqft)} amount={money0(s.price)}
             note={<>70% rule says {money0(seventyRule(s))}; your own underwrite says {money0(mao)}.</>}>
             <Money value={s.price} onChange={v => set('price', v)} /></R>
@@ -558,8 +595,10 @@ export default function FlipPage() {
           <V cls="tot" label="Gross spread at base ARV" value={money0(s.arv.base - s.price)}
             unit={pct(rBase.grossSpread)}
             note={<><b>Target 25–30% of ARV.</b> You are at {pct(rBase.grossSpread)} — {spreadVerdict}.</>} />
+          </>}
 
-          <Band span={5} tag={s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}>Rehab budget</Band>
+          <Band span={5} {...fold('rehab')} tag={`${money0(s.rehab.base)} · ${s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}`}>Rehab budget</Band>
+          {secOpen('rehab') && <>
           <G>Bay Area pricing: cosmetic <b>$90–160/sf</b>, full gut <b>$200–350/sf</b>. Yours is {money0(rBase.rehabPsf)}/sf at base — {rehabVerdict}. Build it on the Scope of Work tab and push it here.</G>
           <R label="Rehab — low" unit={psf(s.rehab.low, sqft)} amount={money0(s.rehab.low)}
             note="Everything goes right: no dry rot, no surprises behind the walls.">
@@ -570,8 +609,10 @@ export default function FlipPage() {
           <R label="Rehab — high" unit={psf(s.rehab.high, sqft)} amount={money0(s.rehab.high)}
             note="You open the walls and find why it was cheap. Honest case pre-1950.">
             <Money value={s.rehab.high} onChange={v => setRehab('high', v)} /></R>
+          </>}
 
-          <Band span={5} tag={`${Math.round(rBase.holdMonths * 30.4375)} days`}>Timeline</Band>
+          <Band span={5} {...fold('time')} tag={`${Math.round(rBase.holdMonths * 30.4375)} days`}>Timeline</Band>
+          {secOpen('time') && <>
           <G>Every extra day costs holding <b>and</b> interest at once. Bay Area flips run <b>150–240 days</b> door to door. Yours is {Math.round(rBase.holdMonths * 30.4375)} — {holdVerdict}.</G>
           <R label="Rehab duration" unit="days" amount={`${(s.rehabDays / 30.4375).toFixed(1)} mo`}
             note="Fold permits in. Bay Area plan check adds 60–120 days before a shovel moves.">
@@ -588,8 +629,10 @@ export default function FlipPage() {
           <V cls="tot" label="Total hold period" value={`${Math.round(rBase.holdMonths * 30.4375)} days`}
             unit={`${rBase.holdMonths.toFixed(1)} mo`}
             note={<>A 30-day slip costs roughly {money0(rBase.holdMonthly + rBase.interest / Math.max(1, rBase.holdMonths))}.</>} />
+          </>}
 
-          <Band span={5} tag={money0(rBase.acqTotal)}>Acquisition costs</Band>
+          <Band span={5} {...fold('acq')} tag={money0(rBase.acqTotal)}>Acquisition costs</Band>
+          {secOpen('acq') && <>
           <R label="Seller provided disclosure package"
             note="California sellers normally deliver TDS, SPQ, NHD and the pest, home and roof reports before offers. Switching this on zeroes the lines it covers." ctl={
             <Switch checked={s.sellerDisclosure} onChange={v => set('sellerDisclosure', v)} />} />
@@ -615,8 +658,10 @@ export default function FlipPage() {
           <V cls="tot" label="Total acquisition" value={money0(rBase.acqTotal)}
             unit={pct(s.price > 0 ? rBase.acqTotal / s.price * 100 : 0)}
             note="Loan points are not here — they live under Financing." />
+          </>}
 
-          <Band span={5} tag={`${money0(rBase.holdMonthly)}/mo`}>Holding costs</Band>
+          <Band span={5} {...fold('hold')} tag={`${money0(rBase.holdTotal)} · ${money0(rBase.holdMonthly)}/mo`}>Holding costs</Band>
+          {secOpen('hold') && <>
           <R label="Levied property tax rate" unit="%" amount={money0(rBase.propertyTax)}
             note="1% Prop 13 base plus local bonds. A published “effective rate” understates this by a third.">
             <Num value={s.taxRatePct} onChange={v => set('taxRatePct', v)} /></R>
@@ -638,8 +683,10 @@ export default function FlipPage() {
           ))}
           <V cls="tot" label={`Total over ${rBase.holdMonths.toFixed(1)} months`} value={money0(rBase.holdTotal)}
             note={<>{pct(s.arv.base > 0 ? rBase.holdTotal / s.arv.base * 100 : 0)} of ARV. Runs whether or not anyone is working on the house.</>} />
+          </>}
 
-          <Band span={5} tag={`${pct(rBase.sellPctOfSale)} of sale`}>Selling costs</Band>
+          <Band span={5} {...fold('sell')} tag={`${money0(rBase.sellTotal)} · ${pct(rBase.sellPctOfSale)} of sale`}>Selling costs</Band>
+          {secOpen('sell') && <>
           <G>All-in Bay Area selling costs run <b>7–9% of sale price</b>. Yours are {pct(rBase.sellPctOfSale)} — {sellVerdict}. If you list it yourself, that commission is income to you, not a cost.</G>
           <R label="Listing commission" unit="%" amount={money0(amt(rBase.sellLines, 'listComm'))}
             note="2.5% standard. Your own listing side is income, not an expense.">
@@ -669,12 +716,14 @@ export default function FlipPage() {
             note="Credits after the buyer’s inspection. 0.5% is light; 1% safer on an older house.">
             <Num value={s.concessionsPct} onChange={v => set('concessionsPct', v)} /></R>
           <R label="CA 3.33% withholding" amount={rBase.withholding > 0 ? money0(rBase.withholding) : undefined}
-            note="Credited against the tax below. Moves cash timing, never profit." ctl={
+            note="Escrow withholds it at close and credits it on your return. Moves cash timing, never profit." ctl={
             <Switch checked={s.withholdingOn} onChange={v => set('withholdingOn', v)} />} />
           <V cls="tot" label="Total selling costs" value={money0(rBase.sellTotal)} unit={pct(rBase.sellPctOfSale)}
             note="Recomputed per ARV scenario — most of these are percentages of sale." />
+          </>}
 
-          <Band span={5} tag={s.finMode === 'hard' ? 'hard money' : s.finMode === 'cash' ? 'all cash' : 'conventional'}>Financing</Band>
+          <Band span={5} {...fold('fin')} tag={`${money0(rBase.finTotal)} · ${s.finMode === 'hard' ? 'hard money' : s.finMode === 'cash' ? 'all cash' : 'conventional'}`}>Financing</Band>
+          {secOpen('fin') && <>
           <G>Hard money funds the rehab in draws; conventional funds only the purchase; all cash ties up every dollar but pays no interest at all.</G>
           <R label="Instrument" note="Switching swaps the input set rather than reinterpreting it." ctl={
             <UnitToggle options={[{ u: 'hard', label: 'Hard money' }, { u: 'conv', label: 'Conventional' }, { u: 'cash', label: 'All cash' }]}
@@ -739,6 +788,7 @@ export default function FlipPage() {
                                        : 'The whole rehab — no lender is funding any of it.'} />
           <V cls="grand" label="Peak cash out of pocket" value={money0(rBase.peakCash)}
             note="The number that decides whether you can do this deal at all." />
+          </>}
 
         </tbody></table></div>
 
@@ -771,12 +821,14 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
         <div className="sumry">
           <div className="hero"><div className="k">Max offer</div>
             <div className="v">{money0(mao)}</div>
-            <div className="s">for {money0(s.minProfit)} pre-tax</div></div>
-          <div><div className="k">Pre-tax profit</div>
-            <div className={`v ${rBase.preTaxProfit < 0 ? 'neg' : rBase.preTaxProfit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.preTaxProfit)}</div>
-            <div className="s">{pct(rBase.marginPreTax)} of ARV</div></div>
-          <div><div className="k">After tax</div><div className="v">{money(rBase.netProfit)}</div>
-            <div className="s">{s.taxPct}% blended</div></div>
+            <div className="s">for {money0(s.minProfit)} profit</div></div>
+          <div><div className="k">Net profit</div>
+            <div className={`v ${rBase.profit < 0 ? 'neg' : rBase.profit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.profit)}</div>
+            <div className="s">{pct(rBase.margin)} of ARV</div></div>
+          <div><div className="k">Profit floor</div><div className="v">{money0(s.minProfit)}</div>
+            <div className="s">{rBase.profit >= s.minProfit
+              ? `${money0(rBase.profit - s.minProfit)} of headroom`
+              : `${money0(s.minProfit - rBase.profit)} short`}</div></div>
           <div><div className="k">ROI on cash</div><div className="v">{pct(rBase.roi)}</div>
             <div className="s">{money0(rBase.peakCash)} invested</div></div>
           <div><div className="k">Annualized</div><div className="v">{pct(rBase.annualizedRoi)}</div>
@@ -789,15 +841,10 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
             <col className="c-amt" /><col className="c-note" />
           </colgroup>
           <tbody>
-          <Band span={5} tag="what the deal has to beat">Targets &amp; tax</Band>
-          <R label="Minimum profit" hint="pre-tax — the walk-away floor"
-            note="Your floor, measured before tax. It sets the verdict above, the max allowable offer, and where the grid below turns green.">
+          <Band span={5} tag={money0(s.minProfit)}>Profit floor</Band>
+          <R label="Minimum profit" hint="the walk-away number" amount={money0(s.minProfit)}
+            note="What the deal has to clear for you to do it. Sets the verdict above, the max offer, and where the grid below turns green.">
             <Money value={s.minProfit} onChange={v => set('minProfit', v)} /></R>
-          <R label="Blended tax rate" unit="%"
-            note="Flip profit is ordinary income and likely dealer property — no capital gains, no 1031. 40–50% combined is typical.">
-            <Num value={s.taxPct} onChange={v => set('taxPct', v)} /></R>
-          <V cls="tot" label="Your floor, after tax" value={money0(floorAfterTax)}
-            note={<>What {money0(s.minProfit)} pre-tax is worth once {s.taxPct}% tax is paid — the line the grid below colours against.</>} />
         </tbody></table></div>
 
         <div className="notice"><div>{seventyRule(s) < mao
@@ -808,7 +855,7 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
             question asked twice, so only the grid survives. */}
         <div className="sheet">
           <table className="ss"><tbody>
-            <Band span={4} tag="ARV across · rehab down">Net profit after tax</Band>
+            <Band span={4} tag="ARV across · rehab down">Net profit</Band>
           </tbody></table>
           <div style={{ padding: '10px 12px 12px' }}>
             <div className="hm-wrap">
@@ -830,7 +877,7 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
                         <th className="rh">{money0(sens.rehabAxis[ri])}
                           <span className="sub">{psf(sens.rehabAxis[ri], sqft)}</span></th>
                         {row.map((v, ci) => (
-                          <td key={ci} style={heatColor(v, floorAfterTax, sens.min, sens.max)}
+                          <td key={ci} style={heatColor(v, s.minProfit, sens.min, sens.max)}
                             className={ri === baseR && ci === baseA ? 'base-cell' : ''}
                             title={`ARV ${money0(sens.arvAxis[ci])} · rehab ${money0(sens.rehabAxis[ri])} → ${money(v)}`}>
                             {compact(v)}
@@ -844,14 +891,14 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
             </div>
             <div className="hm-legend">
               <span className="k"><i className="sw" style={{ background: `rgb(${LOSS_1.join(',')})` }} />Loses money</span>
-              <span className="k"><i className="sw" style={{ background: `rgb(${WARN_1.join(',')})` }} />Under your {money0(s.minProfit)} pre-tax floor</span>
-              <span className="k"><i className="sw" style={{ background: `rgb(${GOOD_1.join(',')})` }} />Clears the floor ({money0(floorAfterTax)} after tax)</span>
+              <span className="k"><i className="sw" style={{ background: `rgb(${WARN_1.join(',')})` }} />Under your {money0(s.minProfit)} floor</span>
+              <span className="k"><i className="sw" style={{ background: `rgb(${GOOD_1.join(',')})` }} />Clears the floor</span>
               <span className="k"><i className="box" />Your budget at base ARV</span>
             </div>
             <p className="footnote">
               Axes span your low-to-high ARV and rehab scenarios with 10% headroom past each end.
               Purchase price ({money0(s.price)}), timeline ({Math.round(rBase.holdMonths * 30.4375)} days),
-              financing and the {s.taxPct}% tax rate are held fixed.
+              and financing are held fixed.
               {city && city.tiers.length > 1 && ' This city has a transfer tax cliff, so expect a step wherever the ARV range crosses it.'}
             </p>
           </div>
@@ -886,14 +933,12 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
             <Fold id="fin" label="Financing cost" pick={r => r.finTotal} lines={cols[selIdx].finLines} />
 
             <Sec span={5}>Result</Sec>
-            <PL cls="tot" label="Pre-tax profit / (loss)" pick={r => r.preTaxProfit} fmt={money} />
-            <PL label={`Income tax at ${s.taxPct}%`} pick={r => r.tax} />
-            <PL cls="grand" label="Net profit after tax" pick={r => r.netProfit} fmt={money} />
+            <PL cls="grand" label="Net profit / (loss)" pick={r => r.profit} fmt={money} />
 
             <Sec span={5}>Returns</Sec>
-            <PL label="Return on cash — after tax" pick={r => r.roi} fmt={pct} share={false} />
+            <PL label="Return on cash" pick={r => r.roi} fmt={pct} share={false} />
             <PL label="Annualized return" pick={r => r.annualizedRoi} fmt={pct} share={false} />
-            <PL label="Margin — % of ARV, pre-tax" pick={r => r.marginPreTax} fmt={pct} share={false} />
+            <PL label="Margin — % of ARV" pick={r => r.margin} fmt={pct} share={false} />
 
             <Sec span={5}>Capital</Sec>
             <PL label="Cash to close" pick={r => r.cashToClose} fmt={money0} share={false} />
@@ -1046,7 +1091,7 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
         Screening estimates only — verify every figure locally before making an offer.
         Transfer tax and property tax presets carry the date they were verified; rates change by ballot
         measure, so confirm before relying on them. Property tax assumes Prop 13 reassessment to the
-        purchase price. Flip profit is treated as ordinary income at one blended rate, not capital gains.
+        purchase price. Every profit figure here is before income tax.
       </p>
     </>
   );

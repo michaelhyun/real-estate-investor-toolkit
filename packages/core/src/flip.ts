@@ -175,8 +175,7 @@ export interface FlipState {
   convFees: number;
   prepayPct: number;
 
-  taxPct: number;
-  /** the walk-away floor, always measured pre-tax */
+  /** the walk-away floor: what the deal has to clear for you to do it */
   minProfit: number;
   /** California sellers normally deliver a disclosure package before offers */
   sellerDisclosure: boolean;
@@ -252,7 +251,6 @@ export function defaultFlipState(): FlipState {
     convFees: 1800,
     prepayPct: 0,
 
-    taxPct: 45,
     minProfit: 75000,
     sellerDisclosure: true,
 
@@ -313,9 +311,7 @@ export interface FlipResult {
   cashForRehab: number;
 
   netProceeds: number;
-  preTaxProfit: number;
-  tax: number;
-  netProfit: number;
+  profit: number;
 
   cashToClose: number;
   cashDuringHold: number;
@@ -325,8 +321,7 @@ export interface FlipResult {
 
   roi: number;
   annualizedRoi: number;
-  marginPreTax: number;
-  marginAfterTax: number;
+  margin: number;
   grossSpread: number;
   arvPsf: number;
   rehabPsf: number;
@@ -501,12 +496,11 @@ export function computeFlip(
 
   /* ---------- the P&L ---------- */
   const netProceeds = sale - sellTotal;
-  const preTaxProfit = netProceeds - price - acqTotal - rehabTotal - holdTotal - finTotal;
-  /* A loss carries no tax. Whether it shelters other income is a question for
-     your return, not for a screening model — assuming it here would flatter
-     every bad deal. */
-  const tax = preTaxProfit > 0 ? preTaxProfit * (s.taxPct / 100) : 0;
-  const netProfit = preTaxProfit - tax;
+  /* Deliberately pre-tax and nothing else. What a flip costs in income tax
+     depends on your other income, your entity and whether the IRS treats you
+     as a dealer — none of which a screening model knows. Applying one blended
+     rate here would put a confident-looking number on a guess. */
+  const profit = netProceeds - price - acqTotal - rehabTotal - holdTotal - finTotal;
 
   /* ---------- capital ----------
      A flip throws off no interim income, so cumulative cash out IS peak cash.
@@ -518,8 +512,9 @@ export function computeFlip(
   const cashDuringHold = holdTotal + cashForRehab + principalPaid + finAt('hold');
   const peakCash = cashToClose + cashDuringHold;
   const cashBackAtClose = netProceeds - payoffAtSale;
-  /* CA withholding is a prepayment against the tax already modelled above, so
-     it is a cash-flow timing item and never an expense. */
+  /* CA withholds 3 1/3% of the sale price at close and credits it against the
+     tax you later owe. It moves cash timing at the closing table; it is not a
+     cost, and it never touches profit. */
   const withholding = s.withholdingOn ? sale * 0.0333 : 0;
 
   const sqft = s.prop.sqft || 0;
@@ -531,13 +526,12 @@ export function computeFlip(
     sellLines, sellTotal, sellPctOfSale: sale > 0 ? sellTotal / sale * 100 : 0,
     finLines, finTotal, loanAtClose, peakLoan, downPayment,
     interest, principalPaid, payoffAtSale, cashForRehab,
-    netProceeds, preTaxProfit, tax, netProfit,
+    netProceeds, profit,
     cashToClose, cashDuringHold, peakCash, cashBackAtClose, withholding,
-    roi: peakCash > 0 ? netProfit / peakCash * 100 : 0,
+    roi: peakCash > 0 ? profit / peakCash * 100 : 0,
     annualizedRoi: peakCash > 0 && holdMonths > 0
-      ? (netProfit / peakCash * 100) * (12 / holdMonths) : 0,
-    marginPreTax: sale > 0 ? preTaxProfit / sale * 100 : 0,
-    marginAfterTax: sale > 0 ? netProfit / sale * 100 : 0,
+      ? (profit / peakCash * 100) * (12 / holdMonths) : 0,
+    margin: sale > 0 ? profit / sale * 100 : 0,
     grossSpread: sale > 0 ? (sale - price) / sale * 100 : 0,
     arvPsf: sqft > 0 ? sale / sqft : 0,
     rehabPsf: sqft > 0 ? rehabTotal / sqft : 0,
@@ -551,8 +545,7 @@ export function computeFlip(
     tax cliffs, so bisection rather than anything gradient-based. */
 export function solveMAO(s: FlipState): number {
   const target = s.minProfit;
-  /* the floor is a pre-tax number, so the solve is too */
-  const profitAt = (p: number) => computeFlip(s, 'base', 'base', p).preTaxProfit - target;
+  const profitAt = (p: number) => computeFlip(s, 'base', 'base', p).profit - target;
   let lo = 0, hi = Math.max(s.arv.base, 1);
   if (profitAt(lo) < 0) return 0;          /* the deal fails even at a $0 basis */
   if (profitAt(hi) > 0) return hi;         /* would clear the bar paying full ARV */
@@ -598,7 +591,7 @@ export function buildSensitivity(s: FlipState, n = 7): Sensitivity {
   let min = Infinity, max = -Infinity;
   const cells = rehabAxis.map(rehab => arvAxis.map(arv => {
     const probe: FlipState = { ...s, arv: { low: arv, base: arv, high: arv } };
-    const v = computeFlip(probe, 'base', 'base', undefined, rehab).netProfit;
+    const v = computeFlip(probe, 'base', 'base', undefined, rehab).profit;
     if (v < min) min = v;
     if (v > max) max = v;
     return v;
@@ -611,16 +604,16 @@ export function buildSensitivity(s: FlipState, n = 7): Sensitivity {
 export type Verdict = 'good' | 'ok' | 'bad';
 
 export function verdictFor(r: FlipResult, s: FlipState): { v: Verdict; title: string; sub: string } {
-  if (r.preTaxProfit <= 0) {
+  if (r.profit <= 0) {
     return { v: 'bad', title: 'Loses money', sub: 'This deal is under water at the base case. Re-trade the price or walk.' };
   }
-  if (r.preTaxProfit < s.minProfit) {
+  if (r.profit < s.minProfit) {
     return {
       v: 'ok', title: 'Below your profit floor',
-      sub: `Clears break-even but lands under your ${Math.round(s.minProfit / 1000)}k pre-tax minimum. Thin margin for the risk.`,
+      sub: `Clears break-even but lands under your ${Math.round(s.minProfit / 1000)}k minimum. Thin margin for the risk.`,
     };
   }
-  return { v: 'good', title: 'Clears your floor', sub: 'Base case beats your minimum pre-tax profit with room for the ARV to slip.' };
+  return { v: 'good', title: 'Clears your floor', sub: 'Base case beats your minimum profit with room for the ARV to slip.' };
 }
 
 /** Cities helper re-exported so the UI has one import for flip concerns. */

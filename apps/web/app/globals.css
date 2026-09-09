@@ -704,6 +704,19 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
   height: 32px; border-bottom: 1px solid var(--border-default);
 }
 .ss tr.band td .tag { float: right; font-weight: var(--weight-medium); letter-spacing: 0.02em; text-transform: none; color: var(--text-faint); font-variant-numeric: var(--numeric); }
+
+/* a foldable section header — the tag stays put, so a shut section still
+   reports the one figure you would have opened it for */
+.ss tr.band.fold > td { cursor: pointer; user-select: none; }
+.ss tr.band.fold > td:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ss tr.band.fold > td:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ss tr.band.fold > td .chev {
+  display: inline-block; width: 0; height: 0; margin-right: var(--space-2);
+  vertical-align: middle; border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid var(--text-muted); transition: transform 120ms ease;
+}
+.ss tr.band.fold.shut > td .chev { transform: rotate(-90deg); }
+.ss tr.band.fold.shut > td .tag { color: var(--text-secondary); }
 .sheet.one .ss tr.band td { border-top: 1px solid var(--border-default); }
 .sheet.one .ss tr:first-child td { border-top: 0; }
 .ss tr.sec td {
@@ -840,6 +853,7 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 .sp-row .line { font-weight: var(--weight-semibold); }
 .sp-row .line.off { color: var(--text-faint); font-weight: var(--weight-regular); }
 .sow-bar { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
+.sow-bar .bar-note { font-size: var(--text-xs); color: var(--text-faint); }
 .sow-foot {
   position: sticky; bottom: 0; z-index: 5; background: var(--bg-surface);
   border: 1px solid var(--border-default); border-radius: var(--radius-md);

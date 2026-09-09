@@ -26,7 +26,7 @@ describe('computeFlip — structure', () => {
   it('holds the P&L identity: profit is proceeds less every cost', () => {
     const r = computeFlip(base());
     near(
-      r.preTaxProfit,
+      r.profit,
       r.netProceeds - base().price - r.acqTotal - r.rehabTotal - r.holdTotal - r.finTotal,
     );
   });
@@ -72,7 +72,7 @@ describe('cash conservation — the check that catches double-counted principal'
      balance transfer, this identity breaks by exactly the amount amortized. */
   const conserves = (s: FlipState) => {
     const r = computeFlip(s);
-    near(r.cashBackAtClose - r.peakCash, r.preTaxProfit, 1);
+    near(r.cashBackAtClose - r.peakCash, r.profit, 1);
   };
 
   it('holds in hard money mode', () => conserves(base({ finMode: 'hard' })));
@@ -98,7 +98,7 @@ describe('cash conservation — the check that catches double-counted principal'
     const io = computeFlip(base({ finMode: 'conv', convIO: true }));
     expect(am.interest).toBeLessThan(io.interest);
     /* and therefore earns slightly more profit, purely from the smaller balance */
-    expect(am.preTaxProfit).toBeGreaterThan(io.preTaxProfit);
+    expect(am.profit).toBeGreaterThan(io.profit);
   });
 });
 
@@ -123,7 +123,7 @@ describe('all cash', () => {
     const cash = computeFlip(base({ finMode: 'cash' }));
     const hard = computeFlip(base({ finMode: 'hard' }));
     /* no interest to pay, so more profit */
-    expect(cash.netProfit).toBeGreaterThan(hard.netProfit);
+    expect(cash.profit).toBeGreaterThan(hard.profit);
     /* but far more of your own money on the table, so a lower return */
     expect(cash.roi).toBeLessThan(hard.roi);
   });
@@ -176,7 +176,7 @@ describe('max allowable offer', () => {
     const s = base({ minProfit: 120000 });
     const mao = solveMAO(s);
     expect(mao).toBeGreaterThan(0);
-    near(computeFlip(s, 'base', 'base', mao).preTaxProfit, 120000, 200);
+    near(computeFlip(s, 'base', 'base', mao).profit, 120000, 200);
   });
 
   it('a higher profit floor forces a lower offer', () => {
@@ -192,7 +192,7 @@ describe('max allowable offer', () => {
       minProfit: 60000,
     });
     const mao = solveMAO(s);
-    near(computeFlip(s, 'base', 'base', mao).preTaxProfit, 60000, 500);
+    near(computeFlip(s, 'base', 'base', mao).profit, 60000, 500);
   });
 
   it('returns 0 when the deal cannot clear the floor even for free', () => {
@@ -251,32 +251,22 @@ describe('sensitivity grid', () => {
   });
 });
 
-describe('tax treatment', () => {
-  it('taxes profit at the blended rate', () => {
-    const r = computeFlip(base({ taxPct: 45 }));
-    expect(r.preTaxProfit).toBeGreaterThan(0);
-    near(r.tax, r.preTaxProfit * 0.45);
-    near(r.netProfit, r.preTaxProfit * 0.55);
-  });
-
-  it('a loss carries no tax and no phantom benefit', () => {
-    const r = computeFlip(base({ price: 1_400_000 }));
-    expect(r.preTaxProfit).toBeLessThan(0);
-    near(r.tax, 0);
-    near(r.netProfit, r.preTaxProfit);
-  });
-});
-
 describe('returns', () => {
   it('annualizes simply, by hold period', () => {
     const r = computeFlip(base());
     near(r.annualizedRoi, r.roi * (12 / r.holdMonths), 0.01);
   });
 
+  it('returns are struck on profit itself — nothing is netted down first', () => {
+    const r = computeFlip(base());
+    near(r.roi, r.profit / r.peakCash * 100, 0.01);
+    near(r.margin, r.profit / r.sale * 100, 0.01);
+  });
+
   it('withholding is a cash-flow item, never an expense', () => {
     const off = computeFlip(base({ withholdingOn: false }));
     const on = computeFlip(base({ withholdingOn: true }));
-    near(on.preTaxProfit, off.preTaxProfit);
+    near(on.profit, off.profit);
     near(on.withholding, on.sale * 0.0333, 1);
   });
 });
@@ -630,7 +620,7 @@ describe('seller disclosure package', () => {
     const on = computeFlip(base({ sellerDisclosure: true }));
     const off = computeFlip(base({ sellerDisclosure: false }));
     expect(off.acqTotal).toBeGreaterThan(on.acqTotal);
-    expect(off.preTaxProfit).toBeLessThan(on.preTaxProfit);
+    expect(off.profit).toBeLessThan(on.profit);
   });
 
   it('does not disturb the values you typed — they come back', () => {
@@ -639,14 +629,11 @@ describe('seller disclosure package', () => {
   });
 });
 
-describe('the profit floor is pre-tax', () => {
-  it('the verdict reads pre-tax profit, not net', () => {
-    /* a deal whose pre-tax profit clears the floor but whose after-tax does
-       not must still read as clearing it */
-    const s = base({ minProfit: 100000, taxPct: 45 });
+describe('the profit floor', () => {
+  it('the verdict reads profit against the floor', () => {
+    const s = base({ minProfit: 100000 });
     const r = computeFlip(s);
-    expect(r.preTaxProfit).toBeGreaterThan(100000);
-    expect(r.netProfit).toBeLessThan(100000);
+    expect(r.profit).toBeGreaterThan(100000);
     expect(verdictFor(r, s).v).toBe('good');
   });
 
