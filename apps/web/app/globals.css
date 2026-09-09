@@ -1041,3 +1041,43 @@ details.collapse summary .sum-val { font-size: var(--text-base); color: var(--te
 details.collapse .inner { border-left: 2px solid var(--border-subtle); margin: 0 0 var(--space-2) var(--space-1); padding-left: var(--space-3); }
 details.collapse .inner .row { min-height: 28px; }
 details.collapse .inner .row label { font-size: var(--text-base); }
+
+/* ---------- profit waterfall ----------
+   Length is the whole encoding, so the marks are thin, the track is recessive,
+   and every row is directly labelled — colour only says gain or cost. */
+.wf-chart { display: flex; flex-direction: column; gap: 3px; }
+.wf-row { display: grid; grid-template-columns: 152px minmax(0, 1fr) 108px 56px; gap: var(--space-2); align-items: center; }
+.wf-lb { font-size: var(--text-base); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wf-track { position: relative; height: 18px; background: var(--slate-100); border-radius: 3px; }
+.wf-bar { position: absolute; top: 2px; bottom: 2px; background: var(--cost); border-radius: 3px; min-width: 2px; box-shadow: 0 0 0 2px var(--bg-surface); }
+.wf-amt { text-align: right; font-size: var(--text-base); font-variant-numeric: var(--numeric); color: var(--cost); white-space: nowrap; }
+.wf-share { text-align: right; font-size: var(--text-sm); color: var(--text-faint); font-variant-numeric: var(--numeric); }
+
+.wf-row--start .wf-bar, .wf-row--result .wf-bar { background: var(--gain); }
+.wf-row--start .wf-lb, .wf-row--result .wf-lb { font-weight: var(--weight-semibold); color: var(--text-primary); }
+.wf-row--start .wf-amt, .wf-row--result .wf-amt { color: var(--gain); font-weight: var(--weight-semibold); }
+.wf-row--result { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--border-default); }
+.wf-row--start { margin-bottom: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border-default); }
+.wf-row.loss .wf-bar { background: var(--danger); }
+.wf-row.loss .wf-amt { color: var(--danger); }
+
+.wf-legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin-top: var(--space-3); font-size: var(--text-sm); color: var(--text-muted); }
+.wf-legend span { display: inline-flex; align-items: center; gap: var(--space-1); }
+.wf-legend .sw { width: 10px; height: 10px; border-radius: 2px; }
+.wf-legend .sw.gain { background: var(--gain); }
+.wf-legend .sw.cost { background: var(--cost); }
+
+/* a line covered by the seller's disclosure package */
+.ss .cov {
+  font-size: var(--text-xs); font-weight: var(--weight-semibold); text-transform: uppercase;
+  letter-spacing: 0.02em; background: var(--slate-150); color: var(--text-muted);
+  border-radius: 3px; padding: 0 var(--space-1); margin-left: var(--space-1);
+}
+.ss .num.covered { text-decoration: line-through; color: var(--text-faint); background: var(--slate-100); }
+
+@media (max-width: 700px) {
+  .wf-row { grid-template-columns: 108px minmax(0, 1fr) 92px; }
+  .wf-share { display: none; }
+  .wf-lb { font-size: var(--text-sm); }
+  .wf-amt { font-size: var(--text-sm); }
+}

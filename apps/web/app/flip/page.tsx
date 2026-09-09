@@ -18,11 +18,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   defaultFlipState, computeFlip, solveMAO, seventyRule, buildSensitivity,
-  verdictFor, SCENARIO_KEYS, ACQ_ITEMS, HOLD_ITEMS, SELL_FLAT_ITEMS,
+  verdictFor, buildWaterfall, SELLER_PROVIDED, SCENARIO_KEYS, ACQ_ITEMS, HOLD_ITEMS, SELL_FLAT_ITEMS,
   citiesByCounty, findCity,
   buildSpaces, computeSow, applyLevel, taskKey, taskQty, taskCost, priceKey, DEF_BY_KIND, LEVEL_LABELS,
   money, money0, pct, parseNum,
-  type FlipState, type ScenarioKey, type CostLine, type FlipResult,
+  type FlipState, type ScenarioKey, type CostLine, type FlipResult, type WaterfallStep,
   type PropertyShape, type SpaceInstance, type SowTask, type Level,
 } from '@reit/core';
 import { NumInput, Switch, UnitToggle, loadJSON, saveJSON, openReportWindow } from '../../components/ui';
@@ -59,6 +59,12 @@ function normalizeFlip(d: any): FlipState {
     rehabDays: d.rehabDays ?? (d.rehabMonths !== undefined ? Math.round(d.rehabMonths * 30.4375) : base.rehabDays),
     overrunDays: d.overrunDays ?? (d.overrunMonths !== undefined ? Math.round(d.overrunMonths * 30.4375) : base.overrunDays),
     buyerCommPct: d.buyerCommPct ?? d.buyCommPct ?? base.buyerCommPct,
+    /* the floor is pre-tax now; a deal saved with an after-tax floor is
+       converted so it still means the same thing */
+    minProfit: d.minProfitBasis === 'after' && d.minProfit
+      ? Math.round(d.minProfit / (1 - (d.taxPct ?? base.taxPct) / 100))
+      : (d.minProfit ?? base.minProfit),
+    sellerDisclosure: d.sellerDisclosure ?? base.sellerDisclosure,
     buySideCommPct: d.buySideCommPct ?? base.buySideCommPct,
     acq: { ...base.acq, ...(d.acq || {}) },
     hold: { ...base.hold, ...(d.hold || {}) },
@@ -168,6 +174,43 @@ function V({ label, hint, value, unit, cls, note }: {
   );
 }
 
+/** Sale price down to net profit, as a waterfall.
+
+    Each cost bar starts where the running balance ends, so the bar you can see
+    is literally the slice that step took out of the deal. Length is the whole
+    encoding: the longest bar is the biggest problem, which is the question this
+    chart exists to answer. Every bar carries its own name and figure, so
+    identity never depends on colour alone. */
+function Waterfall({ steps, sale }: { steps: WaterfallStep[]; sale: number }) {
+  if (sale <= 0) return null;
+  const pos = (n: number) => `${Math.max(0, Math.min(100, (n / sale) * 100))}%`;
+  return (
+    <div className="wf-chart">
+      {steps.map(st => {
+        const loss = st.kind === 'result' && st.amount < 0;
+        const left = st.kind === 'cost' ? pos(st.balance) : '0%';
+        const width = st.kind === 'cost' ? pos(st.amount)
+          : st.kind === 'start' ? '100%' : pos(Math.abs(st.amount));
+        return (
+          <div className={`wf-row wf-row--${st.kind}${loss ? ' loss' : ''}`} key={st.id}>
+            <div className="wf-lb">{st.label}</div>
+            <div className="wf-track">
+              <div className="wf-bar" style={{ left, width }}
+                title={`${st.label} — ${money(st.amount)} (${pct(st.share)} of sale price)`} />
+            </div>
+            <div className="wf-amt">{st.kind === 'cost' ? `(${money0(st.amount)})` : money(st.amount)}</div>
+            <div className="wf-share">{pct(st.share)}</div>
+          </div>
+        );
+      })}
+      <div className="wf-legend">
+        <span><i className="sw gain" />Proceeds and what is left</span>
+        <span><i className="sw cost" />Cost — bar length is the share it takes</span>
+      </div>
+    </div>
+  );
+}
+
 const Money = ({ value, onChange }: { value: number; onChange: (n: number) => void }) =>
   <NumInput value={value} onChange={onChange} />;
 const Num = ({ value, onChange }: { value: number; onChange: (n: number) => void }) =>
@@ -262,6 +305,10 @@ export default function FlipPage() {
   const sens = useMemo(() => buildSensitivity(s, 7), [s]);
   const mao = useMemo(() => solveMAO(s), [s]);
   const verdict = verdictFor(rBase, s);
+  const waterfall = useMemo(() => buildWaterfall(s, rBase), [s, rBase]);
+  /* the grid shows profit after tax, so the pre-tax floor has to be converted
+     before it can colour those cells */
+  const floorAfterTax = s.minProfit * (1 - s.taxPct / 100);
 
   /* Screening benchmarks. These are rules of thumb, not rules — they exist so a
      number on screen carries a sense of whether it is normal for the Bay Area. */
@@ -476,7 +523,7 @@ export default function FlipPage() {
           <div><div className="k">Hold</div><div className="v">{Math.round(rBase.holdMonths * 30.4375)}</div>
             <div className="s">days · {rBase.holdMonths.toFixed(1)} mo</div></div>
           <div><div className="k">Max offer</div><div className="v">{money0(mao)}</div>
-            <div className="s">for {money0(s.minProfit)} net</div></div>
+            <div className="s">for {money0(s.minProfit)} pre-tax</div></div>
         </div>
 
         {city?.note && <div className="notice warn"><div><b>{city.name}</b>{city.note}</div></div>}
@@ -565,14 +612,24 @@ export default function FlipPage() {
             note={<>A 30-day slip costs roughly {money0(rBase.holdMonthly + rBase.interest / Math.max(1, rBase.holdMonths))}.</>} />
 
           <Band span={5} tag={money0(rBase.acqTotal)}>Acquisition costs</Band>
-          <G><b>California sellers deliver a disclosure package before offers</b> — TDS, SPQ, NHD and usually pest, home and roof reports — so those lines default to $0. What the reports find belongs in rehab, not here.</G>
+          <R label="Seller provided disclosure package"
+            note="California sellers normally deliver TDS, SPQ, NHD and the pest, home and roof reports before offers. Switching this on zeroes the lines it covers." ctl={
+            <Switch checked={s.sellerDisclosure} onChange={v => set('sellerDisclosure', v)} />} />
           <R label="Buy-side commission" unit="%" amount={money0(amt(rBase.acqLines, 'buySideComm'))}
             note="What you pay a buyer's agent to acquire. If you represent yourself it is income, not a cost.">
             <Num value={s.buySideCommPct} onChange={v => set('buySideCommPct', v)} /></R>
-          {ACQ_ITEMS.map(i => (
-            <R key={i.id} label={i.label} note={i.note} amount={money0(s.acq[i.id] ?? 0)}>
-              <Money value={s.acq[i.id] ?? 0} onChange={v => setMap('acq', i.id, v)} /></R>
-          ))}
+          {ACQ_ITEMS.map(i => {
+            /* covered by the package: the value you typed is kept, shown struck
+               through, and excluded from the total until you switch it off */
+            const covered = s.sellerDisclosure && SELLER_PROVIDED.has(i.id);
+            return (
+              <R key={i.id} label={<>{i.label}{covered && <span className="cov">seller</span>}</>}
+                note={i.note} amount={covered ? money0(0) : money0(s.acq[i.id] ?? 0)}>
+                <NumInput value={s.acq[i.id] ?? 0} disabled={covered}
+                  className={covered ? 'covered' : ''}
+                  onChange={v => setMap('acq', i.id, v)} /></R>
+            );
+          })}
           {rBase.acqLines.filter(l => l.derived && l.id !== 'buySideComm' && l.amount !== 0).map((l, i) => (
             <V key={i} label={l.label} value={money0(l.amount)} unit="auto"
               note="Computed from the city preset and who pays." />
@@ -705,21 +762,6 @@ export default function FlipPage() {
           <V cls="grand" label="Peak cash out of pocket" value={money0(rBase.peakCash)}
             note="The number that decides whether you can do this deal at all." />
 
-          <Band span={5}>Tax &amp; thresholds</Band>
-          <R label="Blended tax rate" unit="%" amount={money0(rBase.tax)}
-            note="Ordinary income, likely dealer property — no capital gains, no 1031. 40–50% typical.">
-            <Num value={s.taxPct} onChange={v => set('taxPct', v)} /></R>
-          <R label="A loss shelters other income" note="Off by default so a bad deal shows its full loss." ctl={
-            <Switch checked={s.lossOffsetsIncome} onChange={v => set('lossOffsetsIncome', v)} />} />
-          <R label="Minimum profit" amount={money0(mao)}
-            note="Your floor. The amount at right is the most you can pay and still hit it.">
-            <Money value={s.minProfit} onChange={v => set('minProfit', v)} /></R>
-          <R label="Floor is measured"
-            note="Pre-tax is what flippers quote each other; after-tax is what reaches your account." ctl={
-            <UnitToggle options={[{ u: 'after', label: 'after tax' }, { u: 'pre', label: 'pre-tax' }]}
-              value={s.minProfitBasis} onChange={u => set('minProfitBasis', u as 'after' | 'pre')} />} />
-          <V cls="grand" label="Net profit after tax" value={money(rBase.netProfit)}
-            note={<>{pct(rBase.roi)} on {money0(rBase.peakCash)} of cash, {pct(rBase.annualizedRoi)} annualized.</>} />
         </tbody></table></div>
 
         {diverged && (
@@ -762,6 +804,42 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
             <div className="s">70% rule: {money0(seventyRule(s))}</div></div>
         </div>
 
+        <div className="sheet"><table className="ss with-notes">
+          <colgroup>
+            <col className="c-lb" /><col className="c-n" /><col className="c-u" />
+            <col className="c-amt" /><col className="c-note" />
+          </colgroup>
+          <tbody>
+          <Band span={5} tag="what the deal has to beat">Targets &amp; tax</Band>
+          <R label="Minimum profit" hint="pre-tax — the walk-away floor"
+            note="Your floor, measured before tax. It sets the verdict above, the max allowable offer, and where the grid below turns green.">
+            <Money value={s.minProfit} onChange={v => set('minProfit', v)} /></R>
+          <R label="Blended tax rate" unit="%"
+            note="Flip profit is ordinary income and likely dealer property — no capital gains, no 1031. 40–50% combined is typical.">
+            <Num value={s.taxPct} onChange={v => set('taxPct', v)} /></R>
+          <R label="A loss shelters other income" note="Off by default so a bad deal shows its full loss." ctl={
+            <Switch checked={s.lossOffsetsIncome} onChange={v => set('lossOffsetsIncome', v)} />} />
+          <V cls="tot" label="Your floor, after tax" value={money0(floorAfterTax)}
+            note={<>What {money0(s.minProfit)} pre-tax is worth once {s.taxPct}% tax is paid — the line the grid below colours against.</>} />
+        </tbody></table></div>
+
+        <div className="sheet">
+          <table className="ss"><tbody>
+            <Band span={4} tag="sale price down to net profit">Where the money goes</Band>
+          </tbody></table>
+          <div style={{ padding: 'var(--space-3)' }}>
+            <Waterfall steps={waterfall} sale={rBase.sale} />
+            <p className="footnote" style={{ marginTop: 'var(--space-2)' }}>
+              Each bar starts where the balance above it ends, so its length is the slice that cost
+              takes out of the deal. On this deal the largest single line after the purchase itself is
+              {' '}<b>{[...waterfall].filter(w => w.kind === 'cost' && w.id !== 'purchase')
+                    .sort((a, b) => b.amount - a.amount)[0]?.label.toLowerCase()}</b>{' '}
+              at {money0([...waterfall].filter(w => w.kind === 'cost' && w.id !== 'purchase')
+                    .sort((a, b) => b.amount - a.amount)[0]?.amount ?? 0)}.
+            </p>
+          </div>
+        </div>
+
         <div className="notice"><div>{seventyRule(s) < mao
           ? `The 70% rule is stricter than your own numbers by ${money0(mao - seventyRule(s))}. It assumes financing and selling costs that Bay Area price points don't match, so trust your MAO.`
           : `The 70% rule is looser than your own numbers by ${money0(seventyRule(s) - mao)}. Your underwrite says pay less than the rule of thumb — trust the underwrite.`}</div></div>
@@ -792,7 +870,7 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
                         <th className="rh">{money0(sens.rehabAxis[ri])}
                           <span className="sub">{psf(sens.rehabAxis[ri], sqft)}</span></th>
                         {row.map((v, ci) => (
-                          <td key={ci} style={heatColor(v, s.minProfit, sens.min, sens.max)}
+                          <td key={ci} style={heatColor(v, floorAfterTax, sens.min, sens.max)}
                             className={ri === baseR && ci === baseA ? 'base-cell' : ''}
                             title={`ARV ${money0(sens.arvAxis[ci])} · rehab ${money0(sens.rehabAxis[ri])} → ${money(v)}`}>
                             {compact(v)}
@@ -806,8 +884,8 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
             </div>
             <div className="hm-legend">
               <span className="k"><i className="sw" style={{ background: `rgb(${LOSS_1.join(',')})` }} />Loses money</span>
-              <span className="k"><i className="sw" style={{ background: `rgb(${WARN_1.join(',')})` }} />Profitable but under your {money0(s.minProfit)} floor</span>
-              <span className="k"><i className="sw" style={{ background: `rgb(${GOOD_1.join(',')})` }} />Clears the floor</span>
+              <span className="k"><i className="sw" style={{ background: `rgb(${WARN_1.join(',')})` }} />Under your {money0(s.minProfit)} pre-tax floor</span>
+              <span className="k"><i className="sw" style={{ background: `rgb(${GOOD_1.join(',')})` }} />Clears the floor ({money0(floorAfterTax)} after tax)</span>
               <span className="k"><i className="box" />Your budget at base ARV</span>
             </div>
             <p className="footnote">

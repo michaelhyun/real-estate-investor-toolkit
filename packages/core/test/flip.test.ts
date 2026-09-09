@@ -6,7 +6,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  defaultFlipState, computeFlip, solveMAO, seventyRule,
+  defaultFlipState, computeFlip, solveMAO, seventyRule, buildWaterfall,
+  verdictFor, SELLER_PROVIDED, ACQ_ITEMS,
   buildSensitivity, type FlipState,
 } from '../src/flip';
 import { cityTransferTax, findCity, countyTransferTax } from '../src/bayAreaCities';
@@ -171,16 +172,11 @@ describe('transfer tax — cliffs, not marginal brackets', () => {
 });
 
 describe('max allowable offer', () => {
-  it('a deal bought at MAO lands exactly on the profit floor', () => {
-    const s = base({ minProfit: 75000, minProfitBasis: 'after' });
+  it('a deal bought at MAO lands exactly on the pre-tax profit floor', () => {
+    const s = base({ minProfit: 120000 });
     const mao = solveMAO(s);
     expect(mao).toBeGreaterThan(0);
-    near(computeFlip(s, 'base', 'base', mao).netProfit, 75000, 200);
-  });
-
-  it('solves against pre-tax profit when that is the basis', () => {
-    const s = base({ minProfit: 120000, minProfitBasis: 'pre' });
-    near(computeFlip(s, 'base', 'base', solveMAO(s)).preTaxProfit, 120000, 200);
+    near(computeFlip(s, 'base', 'base', mao).preTaxProfit, 120000, 200);
   });
 
   it('a higher profit floor forces a lower offer', () => {
@@ -196,7 +192,7 @@ describe('max allowable offer', () => {
       minProfit: 60000,
     });
     const mao = solveMAO(s);
-    near(computeFlip(s, 'base', 'base', mao).netProfit, 60000, 500);
+    near(computeFlip(s, 'base', 'base', mao).preTaxProfit, 60000, 500);
   });
 
   it('returns 0 when the deal cannot clear the floor even for free', () => {
@@ -612,5 +608,111 @@ describe('renovation guide', () => {
       expect(t.cost).toBeGreaterThanOrEqual(g.unitLow);
       expect(t.cost).toBeLessThanOrEqual(g.unitHigh);
     }
+  });
+});
+
+
+describe('seller disclosure package', () => {
+  it('zeroes exactly the lines the package covers, and nothing else', () => {
+    const on = computeFlip(base({ sellerDisclosure: true }));
+    const off = computeFlip(base({ sellerDisclosure: false }));
+    for (const i of ACQ_ITEMS) {
+      const a = on.acqLines.find(l => l.id === i.id)!.amount;
+      const b = off.acqLines.find(l => l.id === i.id)!.amount;
+      if (SELLER_PROVIDED.has(i.id)) { near(a, 0); near(b, i.val); }
+      else near(a, b);
+    }
+  });
+
+  it('the sewer lateral scope stays yours either way', () => {
+    /* even when disclosed it is worth your own eyes — a failed lateral is
+       $15-30k and four Alameda County cities need a certificate at sale */
+    expect(SELLER_PROVIDED.has('inspSewer')).toBe(false);
+    expect(computeFlip(base({ sellerDisclosure: true })).acqLines
+      .find(l => l.id === 'inspSewer')!.amount).toBeGreaterThan(0);
+  });
+
+  it('turning it off raises acquisition cost and lowers profit', () => {
+    const on = computeFlip(base({ sellerDisclosure: true }));
+    const off = computeFlip(base({ sellerDisclosure: false }));
+    expect(off.acqTotal).toBeGreaterThan(on.acqTotal);
+    expect(off.preTaxProfit).toBeLessThan(on.preTaxProfit);
+  });
+
+  it('does not disturb the values you typed — they come back', () => {
+    const s = base({ sellerDisclosure: true });
+    expect(s.acq.inspGeneral).toBeGreaterThan(0);
+  });
+});
+
+describe('the profit floor is pre-tax', () => {
+  it('the verdict reads pre-tax profit, not net', () => {
+    /* a deal whose pre-tax profit clears the floor but whose after-tax does
+       not must still read as clearing it */
+    const s = base({ minProfit: 100000, taxPct: 45 });
+    const r = computeFlip(s);
+    expect(r.preTaxProfit).toBeGreaterThan(100000);
+    expect(r.netProfit).toBeLessThan(100000);
+    expect(verdictFor(r, s).v).toBe('good');
+  });
+
+  it('flags a deal under the floor', () => {
+    const s = base({ minProfit: 200000 });
+    expect(verdictFor(computeFlip(s), s).v).toBe('ok');
+  });
+
+  it('flags a losing deal', () => {
+    const s = base({ price: 1_400_000 });
+    expect(verdictFor(computeFlip(s), s).v).toBe('bad');
+  });
+});
+
+describe('profit waterfall', () => {
+  const s = base();
+  const r = computeFlip(s);
+  const w = buildWaterfall(s, r);
+
+  it('starts at the sale price and ends on net profit', () => {
+    expect(w[0].kind).toBe('start');
+    near(w[0].amount, r.sale);
+    const last = w[w.length - 1];
+    expect(last.kind).toBe('result');
+    near(last.amount, r.netProfit, 1);
+  });
+
+  /* the picture asserts an arithmetic claim; this is that claim */
+  it('every step lands on the balance the P&L reports', () => {
+    let bal = r.sale;
+    for (const step of w.slice(1, -1)) {
+      expect(step.kind).toBe('cost');
+      bal -= step.amount;
+      near(step.balance, bal, 1);
+    }
+    near(bal, r.netProfit, 1);
+  });
+
+  it('accounts for every cost group exactly once', () => {
+    const costs = w.filter(x => x.kind === 'cost');
+    expect(costs.map(x => x.id).sort()).toEqual(
+      ['acq', 'fin', 'hold', 'purchase', 'rehab', 'sell', 'tax']);
+    near(costs.reduce((a, x) => a + x.amount, 0), r.sale - r.netProfit, 1);
+  });
+
+  it('shares are of the sale price and sum with the result to 100%', () => {
+    const total = w.filter(x => x.kind !== 'start').reduce((a, x) => a + x.share, 0);
+    near(total, 100, 0.01);
+  });
+
+  it('makes the biggest cost findable — purchase price dominates a flip', () => {
+    const costs = w.filter(x => x.kind === 'cost').sort((a, b) => b.amount - a.amount);
+    expect(costs[0].id).toBe('purchase');
+  });
+
+  it('a losing deal still balances', () => {
+    const bad = base({ price: 1_400_000 });
+    const br = computeFlip(bad);
+    const bw = buildWaterfall(bad, br);
+    near(bw[bw.length - 1].amount, br.netProfit, 1);
+    expect(br.netProfit).toBeLessThan(0);
   });
 });

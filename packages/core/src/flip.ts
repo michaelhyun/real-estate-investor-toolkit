@@ -54,21 +54,27 @@ export const ACQ_ITEMS: LineDef[] = [
     note: 'Lender-required and buyer-paid. Drops to $0 all cash.' },
   { id: 'recording', label: 'County recording', val: 225,
     note: 'Fixed county charge. Barely moves with price.' },
-  { id: 'inspGeneral', label: 'General home inspection', val: 0,
+  { id: 'inspGeneral', label: 'General home inspection', val: 650,
     note: '$500\u2013800 for your own. Seller\u2019s package normally covers it.' },
-  { id: 'inspPest', label: 'Pest / termite inspection', val: 0,
+  { id: 'inspPest', label: 'Pest / termite inspection', val: 400,
     note: '$350\u2013500, almost always in the seller\u2019s package.' },
   { id: 'inspSewer', label: 'Sewer lateral video scope', val: 350,
     note: 'Worth it anyway \u2014 a failed lateral is $15\u201330k and four cities demand a certificate.' },
-  { id: 'inspFoundation', label: 'Foundation / structural', val: 0,
+  { id: 'inspFoundation', label: 'Foundation / structural', val: 800,
     note: '$600\u20131,000. Order on pre-1950 or any visible cracking.' },
-  { id: 'inspRoof', label: 'Roof inspection', val: 0,
+  { id: 'inspRoof', label: 'Roof inspection', val: 350,
     note: '$300\u2013450, usually in the seller\u2019s package.' },
   { id: 'appraisal', label: 'Appraisal / BPO', val: 900,
     note: '$700\u20131,100, lender-required and buyer-paid. $0 all cash.' },
   { id: 'miscAcq', label: 'Wire, notary, courier, misc', val: 250,
     note: 'Small fixed escrow charges.' },
 ];
+
+/** The acquisition lines a California seller's disclosure package normally
+    already covers. The sewer lateral scope is deliberately NOT here: even when
+    the seller discloses one, a failed lateral is $15-30k and four Alameda
+    County cities need a certificate at sale, so it is worth your own eyes. */
+export const SELLER_PROVIDED = new Set(['inspGeneral', 'inspPest', 'inspFoundation', 'inspRoof']);
 
 /** Holding costs, all $/month over the hold period. */
 export const HOLD_ITEMS: LineDef[] = [
@@ -171,8 +177,10 @@ export interface FlipState {
 
   taxPct: number;
   lossOffsetsIncome: boolean;
+  /** the walk-away floor, always measured pre-tax */
   minProfit: number;
-  minProfitBasis: 'after' | 'pre';
+  /** California sellers normally deliver a disclosure package before offers */
+  sellerDisclosure: boolean;
 
   /* Scope-of-work selections only, keyed `<spaceId>.<taskId>`. Prices are NOT
      here: the catalog is shared across every deal so a corrected price
@@ -248,7 +256,7 @@ export function defaultFlipState(): FlipState {
     taxPct: 45,
     lossOffsetsIncome: false,
     minProfit: 75000,
-    minProfitBasis: 'after',
+    sellerDisclosure: true,
 
     checked: {},
     qty: {},
@@ -352,8 +360,10 @@ export function computeFlip(
   const buyShare = payerShare(s.transferPayer, 'buy');
   const buyCityTax = cityTransferTax(city, price) * buyShare;
   const buyCountyTax = countyTransferTax(price) * buyShare;
+  const acqValue = (id: string) =>
+    s.sellerDisclosure && SELLER_PROVIDED.has(id) ? 0 : (s.acq[id] ?? 0);
   const acqLines: CostLine[] = ACQ_ITEMS.map(i => ({
-    label: i.label, amount: s.acq[i.id] ?? 0, hint: i.hint,
+    id: i.id, label: i.label, amount: acqValue(i.id), hint: i.hint,
   }));
   const buySideComm = price * (s.buySideCommPct / 100);
   if (buySideComm > 0) acqLines.push({ id: 'buySideComm', label: `Buy-side commission — ${s.buySideCommPct}%`, amount: buySideComm, derived: true });
@@ -542,10 +552,8 @@ export function computeFlip(
     tax cliffs, so bisection rather than anything gradient-based. */
 export function solveMAO(s: FlipState): number {
   const target = s.minProfit;
-  const profitAt = (p: number) => {
-    const r = computeFlip(s, 'base', 'base', p);
-    return (s.minProfitBasis === 'pre' ? r.preTaxProfit : r.netProfit) - target;
-  };
+  /* the floor is a pre-tax number, so the solve is too */
+  const profitAt = (p: number) => computeFlip(s, 'base', 'base', p).preTaxProfit - target;
   let lo = 0, hi = Math.max(s.arv.base, 1);
   if (profitAt(lo) < 0) return 0;          /* the deal fails even at a $0 basis */
   if (profitAt(hi) > 0) return hi;         /* would clear the bar paying full ARV */
@@ -604,17 +612,55 @@ export function buildSensitivity(s: FlipState, n = 7): Sensitivity {
 export type Verdict = 'good' | 'ok' | 'bad';
 
 export function verdictFor(r: FlipResult, s: FlipState): { v: Verdict; title: string; sub: string } {
-  if (r.netProfit <= 0) {
+  if (r.preTaxProfit <= 0) {
     return { v: 'bad', title: 'Loses money', sub: 'This deal is under water at the base case. Re-trade the price or walk.' };
   }
-  if (r.netProfit < s.minProfit) {
+  if (r.preTaxProfit < s.minProfit) {
     return {
       v: 'ok', title: 'Below your profit floor',
-      sub: `Clears break-even but lands under your ${Math.round(s.minProfit / 1000)}k minimum. Thin margin for the risk.`,
+      sub: `Clears break-even but lands under your ${Math.round(s.minProfit / 1000)}k pre-tax minimum. Thin margin for the risk.`,
     };
   }
-  return { v: 'good', title: 'Clears your floor', sub: 'Base case beats your minimum profit with room for the ARV to slip.' };
+  return { v: 'good', title: 'Clears your floor', sub: 'Base case beats your minimum pre-tax profit with room for the ARV to slip.' };
 }
+
+/* ------------------------------------------------------------------ waterfall */
+
+export interface WaterfallStep {
+  id: string;
+  label: string;
+  /** always positive — `kind` says which direction it moves the balance */
+  amount: number;
+  kind: 'start' | 'cost' | 'result';
+  /** running balance once this step has been applied */
+  balance: number;
+  /** share of the sale price, for the label */
+  share: number;
+}
+
+/** Sale price down to net profit, one step per cost group. Built here rather
+    than in the UI so the arithmetic that the picture asserts — every step
+    lands on the balance the P&L reports — is testable. */
+export function buildWaterfall(s: FlipState, r: FlipResult): WaterfallStep[] {
+  const steps: WaterfallStep[] = [];
+  let bal = r.sale;
+  const share = (n: number) => (r.sale > 0 ? (n / r.sale) * 100 : 0);
+  steps.push({ id: 'sale', label: 'Sale price', amount: r.sale, kind: 'start', balance: bal, share: 100 });
+  const cost = (id: string, label: string, amount: number) => {
+    bal -= amount;
+    steps.push({ id, label, amount, kind: 'cost', balance: bal, share: share(amount) });
+  };
+  cost('purchase', 'Purchase price', priceOf(s));
+  cost('rehab', 'Rehab', r.rehabTotal);
+  cost('sell', 'Selling costs', r.sellTotal);
+  cost('fin', 'Financing', r.finTotal);
+  cost('hold', 'Holding costs', r.holdTotal);
+  cost('acq', 'Acquisition costs', r.acqTotal);
+  cost('tax', `Income tax at ${s.taxPct}%`, r.tax);
+  steps.push({ id: 'net', label: 'Net profit', amount: bal, kind: 'result', balance: bal, share: share(bal) });
+  return steps;
+}
+const priceOf = (s: FlipState) => s.price;
 
 /** Cities helper re-exported so the UI has one import for flip concerns. */
 export type { CityPreset };
