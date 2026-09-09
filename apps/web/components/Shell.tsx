@@ -20,6 +20,8 @@ export const TOOLS = [
     desc: 'Payment breakdown, amortization & extra-payment savings' },
   { id: 'flip', name: 'Flip Analyzer', short: 'Flip', href: '/flip', group: 'Calculators',
     desc: 'Scenarios, sensitivity & a room-by-room scope of work' },
+  { id: 'tax', name: 'Income Tax Calculator', short: 'Income Tax', href: '/tax', group: 'Calculators',
+    desc: 'Federal & California, marginal vs effective, capital gains' },
   { id: 'renovations', name: 'Renovation Guide', short: 'Renovation Guide', href: '/renovations', group: 'Guides',
     desc: 'What 50 common Bay Area renovations actually cost' },
   { id: 'portfolio', name: 'Portfolio ROE Dashboard', short: 'Portfolio', href: '/portfolio', group: 'Portfolio',

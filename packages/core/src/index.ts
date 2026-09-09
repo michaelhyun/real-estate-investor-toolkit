@@ -8,3 +8,5 @@ export * from './flip';
 export * from './sow';
 export * from './renovations';
 export * from './market';
+export * from './taxTables';
+export * from './tax';

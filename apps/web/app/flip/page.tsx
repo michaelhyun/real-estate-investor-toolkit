@@ -26,6 +26,7 @@ import {
   type PropertyShape, type SpaceInstance, type SowTask, type Level,
 } from '@reit/core';
 import { NumInput, Switch, UnitToggle, loadJSON, saveJSON, openReportWindow } from '../../components/ui';
+import { Band, Sec, G, R, V, Money, Num, Count } from '../../components/sheet';
 import { buildFlipReport, buildScopeOfWork } from '../../components/flipReport';
 import { AddressInput } from '../../components/AddressInput';
 import { toast } from '../../components/toast';
@@ -116,100 +117,6 @@ const compact = (n: number) => {
 /** Accounting style: a cost reads in parentheses, the way it does on paper. */
 const paren = (n: number) => n === 0 ? '—' : `(${money0(n)})`;
 const psf = (v: number, sqft: number) => sqft > 0 ? `${money0(v / sqft)}/sf` : '';
-
-/* ---------------------------------------------------- sheet row primitives */
-
-/* A section header. Given `onToggle` it also folds the rows under it — the tag
-   holds that section's headline figure, so a shut section still reports the one
-   number you would have opened it for. */
-const Band = ({ children, tag, span = 3, open, onToggle }: {
-  children: React.ReactNode; tag?: React.ReactNode; span?: number;
-  open?: boolean; onToggle?: () => void;
-}) => (
-  <tr className={`band${onToggle ? ' fold' : ''}${onToggle && !open ? ' shut' : ''}`}>
-    <td colSpan={span} onClick={onToggle}
-      role={onToggle ? 'button' : undefined} tabIndex={onToggle ? 0 : undefined}
-      onKeyDown={onToggle ? ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onToggle(); } } : undefined}>
-      {onToggle && <span className="chev" aria-hidden />}
-      {children}
-      {tag && <span className="tag">{tag}</span>}
-    </td>
-  </tr>
-);
-const Sec = ({ children, span = 3 }: { children: React.ReactNode; span?: number }) => (
-  <tr className="sec"><td colSpan={span}>{children}</td></tr>
-);
-
-/** A section-wide guidance row, sitting directly under its band header. */
-const G = ({ children }: { children: React.ReactNode }) => (
-  <tr className="guide"><td colSpan={5}>{children}</td></tr>
-);
-
-/** An editable row: label, the input, a static unit, then guidance. The note
-    cell is only shown on tables marked `with-notes`. */
-function R({ label, hint, unit, children, ctl, note, amount }: {
-  label: React.ReactNode; hint?: string; unit?: React.ReactNode;
-  children?: React.ReactNode; ctl?: React.ReactNode; note?: React.ReactNode;
-  amount?: React.ReactNode;
-}) {
-  return (
-    <tr>
-      <td className="lb">
-        {label}
-        {/* the unit column is dropped on the narrowest screens, so the unit
-            rides along in the label and is revealed there instead */}
-        {unit && <span className="u-inline">{unit}</span>}
-        {hint && <span className="sub">{hint}</span>}
-      </td>
-      {ctl ? <td className="ctl" colSpan={2}>{ctl}</td> : <>
-        <td className="n">{children}</td>
-        <td className="u">{unit}</td>
-      </>}
-      <td className={`amt${amount == null ? ' muted' : ''}`}>{amount ?? '—'}</td>
-      <td className="note">{note}</td>
-    </tr>
-  );
-}
-
-/** A read-only computed row. */
-/** A computed row: nothing to type, so the figure sits in the amount column. */
-function V({ label, hint, value, unit, cls, note }: {
-  label: React.ReactNode; hint?: string; value: React.ReactNode;
-  unit?: React.ReactNode; cls?: string; note?: React.ReactNode;
-}) {
-  return (
-    <tr className={cls}>
-      <td className="lb">
-        {label}
-        {unit && <span className="u-inline">{unit}</span>}
-        {hint && <span className="sub">{hint}</span>}
-      </td>
-      <td className="n" />
-      <td className="u">{unit}</td>
-      <td className="amt">{value}</td>
-      <td className="note">{note}</td>
-    </tr>
-  );
-}
-
-const Money = ({ value, onChange }: { value: number; onChange: (n: number) => void }) =>
-  <NumInput value={value} onChange={onChange} />;
-const Num = ({ value, onChange }: { value: number; onChange: (n: number) => void }) =>
-  <NumInput fmt="raw" value={value} onChange={onChange} />;
-
-/** A count that never realistically exceeds a handful reads better — and is far
-    faster on a phone — as a picker than as a free-text field. */
-function Count({ value, onChange, max, from = 0 }: {
-  value: number; onChange: (n: number) => void; max: number; from?: number;
-}) {
-  const opts = Array.from({ length: max - from + 1 }, (_, i) => from + i);
-  return (
-    <select className="ss-count" value={value} onChange={ev => onChange(Number(ev.target.value))}>
-      {!opts.includes(value) && <option value={value}>{value}</option>}
-      {opts.map(n => <option key={n} value={n}>{n}</option>)}
-    </select>
-  );
-}
 
 /* ================================================================== the page */
 
@@ -1091,7 +998,8 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
         Screening estimates only — verify every figure locally before making an offer.
         Transfer tax and property tax presets carry the date they were verified; rates change by ballot
         measure, so confirm before relying on them. Property tax assumes Prop 13 reassessment to the
-        purchase price. Every profit figure here is before income tax.
+        purchase price. Every profit figure here is before income tax — a flip is ordinary income and
+        also owes self-employment tax, which the Income Tax Calculator models separately.
       </p>
     </>
   );
