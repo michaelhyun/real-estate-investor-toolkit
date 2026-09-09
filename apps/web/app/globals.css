@@ -1081,3 +1081,25 @@ details.collapse .inner .row label { font-size: var(--text-base); }
   .wf-lb { font-size: var(--text-sm); }
   .wf-amt { font-size: var(--text-sm); }
 }
+
+/* the "% of sale" column on the deal model — a recessive reference column, so
+   it reads as annotation next to the figures rather than competing with them */
+.pl th.sh, .pl td.sh {
+  width: 68px; text-align: right; white-space: nowrap;
+  font-size: var(--text-sm); color: var(--text-faint);
+  border-left: 1px solid var(--border-subtle); font-variant-numeric: var(--numeric);
+}
+.pl th.sh { font-weight: var(--weight-semibold); color: var(--text-muted); }
+.pl tr.tot td.sh, .pl tr.grand td.sh { color: var(--text-secondary); font-weight: var(--weight-semibold); }
+
+/* count pickers in the sheet */
+.ss-count {
+  height: 22px; padding: 0 18px 0 var(--space-1); font-size: var(--text-base);
+  border: 1px solid var(--border-strong); border-radius: 3px; background: var(--bg-input);
+  color: var(--text-primary); appearance: none; cursor: pointer; text-align: right;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 10px) 9px, calc(100% - 6px) 9px;
+  background-size: 4px 4px, 4px 4px; background-repeat: no-repeat;
+}
+.ss-count:focus { outline: none; border-color: var(--border-focus); box-shadow: var(--ring); }
+@media (max-width: 700px) { .pl th.sh, .pl td.sh { display: none; } .ss-count { height: 26px; } }

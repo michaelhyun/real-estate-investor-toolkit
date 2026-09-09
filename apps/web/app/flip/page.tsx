@@ -18,11 +18,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   defaultFlipState, computeFlip, solveMAO, seventyRule, buildSensitivity,
-  verdictFor, buildWaterfall, SELLER_PROVIDED, SCENARIO_KEYS, ACQ_ITEMS, HOLD_ITEMS, SELL_FLAT_ITEMS,
+  verdictFor, SELLER_PROVIDED, SCENARIO_KEYS, ACQ_ITEMS, HOLD_ITEMS, SELL_FLAT_ITEMS,
   citiesByCounty, findCity,
   buildSpaces, computeSow, applyLevel, taskKey, taskQty, taskCost, priceKey, DEF_BY_KIND, LEVEL_LABELS,
   money, money0, pct, parseNum,
-  type FlipState, type ScenarioKey, type CostLine, type FlipResult, type WaterfallStep,
+  type FlipState, type ScenarioKey, type CostLine, type FlipResult,
   type PropertyShape, type SpaceInstance, type SowTask, type Level,
 } from '@reit/core';
 import { NumInput, Switch, UnitToggle, loadJSON, saveJSON, openReportWindow } from '../../components/ui';
@@ -174,47 +174,24 @@ function V({ label, hint, value, unit, cls, note }: {
   );
 }
 
-/** Sale price down to net profit, as a waterfall.
-
-    Each cost bar starts where the running balance ends, so the bar you can see
-    is literally the slice that step took out of the deal. Length is the whole
-    encoding: the longest bar is the biggest problem, which is the question this
-    chart exists to answer. Every bar carries its own name and figure, so
-    identity never depends on colour alone. */
-function Waterfall({ steps, sale }: { steps: WaterfallStep[]; sale: number }) {
-  if (sale <= 0) return null;
-  const pos = (n: number) => `${Math.max(0, Math.min(100, (n / sale) * 100))}%`;
-  return (
-    <div className="wf-chart">
-      {steps.map(st => {
-        const loss = st.kind === 'result' && st.amount < 0;
-        const left = st.kind === 'cost' ? pos(st.balance) : '0%';
-        const width = st.kind === 'cost' ? pos(st.amount)
-          : st.kind === 'start' ? '100%' : pos(Math.abs(st.amount));
-        return (
-          <div className={`wf-row wf-row--${st.kind}${loss ? ' loss' : ''}`} key={st.id}>
-            <div className="wf-lb">{st.label}</div>
-            <div className="wf-track">
-              <div className="wf-bar" style={{ left, width }}
-                title={`${st.label} — ${money(st.amount)} (${pct(st.share)} of sale price)`} />
-            </div>
-            <div className="wf-amt">{st.kind === 'cost' ? `(${money0(st.amount)})` : money(st.amount)}</div>
-            <div className="wf-share">{pct(st.share)}</div>
-          </div>
-        );
-      })}
-      <div className="wf-legend">
-        <span><i className="sw gain" />Proceeds and what is left</span>
-        <span><i className="sw cost" />Cost — bar length is the share it takes</span>
-      </div>
-    </div>
-  );
-}
-
 const Money = ({ value, onChange }: { value: number; onChange: (n: number) => void }) =>
   <NumInput value={value} onChange={onChange} />;
 const Num = ({ value, onChange }: { value: number; onChange: (n: number) => void }) =>
   <NumInput fmt="raw" value={value} onChange={onChange} />;
+
+/** A count that never realistically exceeds a handful reads better — and is far
+    faster on a phone — as a picker than as a free-text field. */
+function Count({ value, onChange, max, from = 0 }: {
+  value: number; onChange: (n: number) => void; max: number; from?: number;
+}) {
+  const opts = Array.from({ length: max - from + 1 }, (_, i) => from + i);
+  return (
+    <select className="ss-count" value={value} onChange={ev => onChange(Number(ev.target.value))}>
+      {!opts.includes(value) && <option value={value}>{value}</option>}
+      {opts.map(n => <option key={n} value={n}>{n}</option>)}
+    </select>
+  );
+}
 
 /* ================================================================== the page */
 
@@ -305,7 +282,6 @@ export default function FlipPage() {
   const sens = useMemo(() => buildSensitivity(s, 7), [s]);
   const mao = useMemo(() => solveMAO(s), [s]);
   const verdict = verdictFor(rBase, s);
-  const waterfall = useMemo(() => buildWaterfall(s, rBase), [s, rBase]);
   /* the grid shows profit after tax, so the pre-tax floor has to be converted
      before it can colour those cells */
   const floorAfterTax = s.minProfit * (1 - s.taxPct / 100);
@@ -402,9 +378,13 @@ export default function FlipPage() {
     setCatalogPrices(p => ({ ...p, [key]: v }));
 
   /* one P&L row across the three scenario columns */
-  const PL = ({ label, pick, fmt = paren, cls, hint }: {
+  /* Share of the sale price, taken from the base column — the same reading the
+     waterfall gave, in the table that already has the numbers. */
+  const shareOf = (n: number) => (rBase.sale > 0 ? (n / rBase.sale) * 100 : 0);
+
+  const PL = ({ label, pick, fmt = paren, cls, hint, share = true }: {
     label: React.ReactNode; pick: (r: FlipResult) => number;
-    fmt?: (n: number) => string; cls?: string; hint?: string;
+    fmt?: (n: number) => string; cls?: string; hint?: string; share?: boolean;
   }) => (
     <tr className={cls}>
       <td className="lb">{label}{hint && <span className="sub">{hint}</span>}</td>
@@ -413,6 +393,7 @@ export default function FlipPage() {
           {fmt(pick(c))}
         </td>
       ))}
+      <td className="sh">{share ? pct(shareOf(Math.abs(pick(cols[selIdx])))) : ''}</td>
     </tr>
   );
 
@@ -432,11 +413,13 @@ export default function FlipPage() {
           {cols.map((c, i) => (
             <td key={i} className={`n neg${i === selIdx ? ' on' : ''}`}>{paren(pick(c))}</td>
           ))}
+          <td className="sh">{pct(shareOf(pick(cols[selIdx])))}</td>
         </tr>
         {open && lines.filter(l => l.amount !== 0).map((l, i) => (
           <tr className="detail" key={i}>
             <td className="lb">{l.label}</td>
             <td className="n" colSpan={3}>{money0(l.amount)}</td>
+            <td className="sh">{pct(shareOf(l.amount))}</td>
           </tr>
         ))}
       </>
@@ -481,14 +464,6 @@ export default function FlipPage() {
           </div>
         </div>
 
-        <div className="prop-chips">
-          <span className="p-chip">Gross spread <b>{pct(rBase.grossSpread)}</b></span>
-          <span className="p-chip">ARV <b>{money0(rBase.arvPsf)}/sf</b></span>
-          <span className="p-chip">Purchase <b>{money0(rBase.pricePsf)}/sf</b></span>
-          <span className="p-chip">Rehab <b>{money0(rBase.rehabPsf)}/sf</b></span>
-          <span className="p-chip">Hold <b>{rBase.holdMonths.toFixed(1)} mo</b></span>
-          <span className="p-chip">Peak cash <b>{money0(rBase.peakCash)}</b></span>
-        </div>
       </div>
 
       <nav className="tabs">
@@ -501,11 +476,22 @@ export default function FlipPage() {
 
       {/* ============================================ TAB 1 — ASSUMPTIONS */}
       <section className={`pane${tab === 'assumptions' ? ' on' : ''}`}>
-        {/* the deal at a glance, before any of the detail below */}
+        {/* Max offer leads: the whole point of underwriting a flip is arriving
+            at the number you can pay. Everything else is how it was reached. */}
         <div className="sumry">
-          <div className="hero"><div className="k">Net profit</div>
-            <div className={`v ${rBase.netProfit < 0 ? 'neg' : rBase.netProfit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.netProfit)}</div>
-            <div className="s">after {s.taxPct}% tax</div></div>
+          <div className="hero"><div className="k">Max offer</div>
+            <div className="v">{money0(mao)}</div>
+            <div className="s">for {money0(s.minProfit)} pre-tax</div></div>
+          <div><div className="k">Pre-tax profit</div>
+            <div className={`v ${rBase.preTaxProfit < 0 ? 'neg' : rBase.preTaxProfit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.preTaxProfit)}</div>
+            <div className="s">at {money0(s.price)}</div></div>
+          <div><div className="k">After tax</div><div className="v">{money(rBase.netProfit)}</div>
+            <div className="s">{s.taxPct}% blended</div></div>
+          <div><div className="k">ROI · annual</div><div className="v">{pct(rBase.roi)}</div>
+            <div className="s">{pct(rBase.annualizedRoi)} annualized</div></div>
+          <div><div className="k">Peak cash</div><div className="v">{money0(rBase.peakCash)}</div>
+            <div className="s">{s.finMode === 'cash' ? 'all cash' : s.finMode === 'hard' ? 'hard money' : 'conventional'}</div></div>
+
           <div><div className="k">Purchase</div><div className="v">{money0(s.price)}</div>
             <div className="s">{psf(s.price, sqft)}</div></div>
           <div><div className="k">ARV — base</div><div className="v">{money0(s.arv.base)}</div>
@@ -515,15 +501,7 @@ export default function FlipPage() {
           <div><div className="k">Gross spread</div><div className="v">{pct(rBase.grossSpread)}</div>
             <div className="s">target 25–30%</div></div>
           <div><div className="k">All-in cost</div><div className="v">{money0(allIn)}</div>
-            <div className="s">{psf(allIn, sqft)}</div></div>
-          <div><div className="k">Peak cash</div><div className="v">{money0(rBase.peakCash)}</div>
-            <div className="s">{s.finMode === 'cash' ? 'all cash' : s.finMode === 'hard' ? 'hard money' : 'conventional'}</div></div>
-          <div><div className="k">ROI · annual</div><div className="v">{pct(rBase.roi)}</div>
-            <div className="s">{pct(rBase.annualizedRoi)} annualized</div></div>
-          <div><div className="k">Hold</div><div className="v">{Math.round(rBase.holdMonths * 30.4375)}</div>
-            <div className="s">days · {rBase.holdMonths.toFixed(1)} mo</div></div>
-          <div><div className="k">Max offer</div><div className="v">{money0(mao)}</div>
-            <div className="s">for {money0(s.minProfit)} pre-tax</div></div>
+            <div className="s">{psf(allIn, sqft)} · {Math.round(rBase.holdMonths * 30.4375)} days</div></div>
         </div>
 
         {city?.note && <div className="notice warn"><div><b>{city.name}</b>{city.note}</div></div>}
@@ -549,16 +527,16 @@ export default function FlipPage() {
             </select>} />
           <R label="Square feet" note="Living area from the tax record. Every per-foot figure divides by it.">
             <Money value={sqft} onChange={v => setProp('sqft', v)} /></R>
-          <R label="Beds / full baths / half" note="Drives checklist quantities — a 4/3 prices three showers, not one." ctl={
-            <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 3 }}>
-              <NumInput fmt="raw" small value={s.prop.beds} onChange={v => setProp('beds', v)} />
-              <NumInput fmt="raw" small value={s.prop.baths} onChange={v => setProp('baths', v)} />
-              <NumInput fmt="raw" small value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} />
+          <R label="Beds / full baths / half" note="Drives scope-of-work quantities — a 4/3 prices three showers, not one." ctl={
+            <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
+              <Count value={s.prop.beds} onChange={v => setProp('beds', v)} max={10} />
+              <Count value={s.prop.baths} onChange={v => setProp('baths', v)} max={10} />
+              <Count value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} max={5} />
             </div>} />
           <R label="Stories / garage bays" note="Estimates the foundation perimeter for seismic work and gutters." ctl={
-            <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 3 }}>
-              <NumInput fmt="raw" small value={s.prop.stories} onChange={v => setProp('stories', v)} />
-              <NumInput fmt="raw" small value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} />
+            <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
+              <Count value={s.prop.stories} onChange={v => setProp('stories', v)} max={4} from={1} />
+              <Count value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} max={4} />
             </div>} />
           <R label="Year built" note="Pre-1980 assume asbestos and lead; pre-1950 assume knob-and-tube and an unbolted foundation." ctl={
             <input className="num small" value={s.prop.year} autoComplete="off"
@@ -791,17 +769,18 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
         </div>
 
         <div className="sumry">
-          <div className="hero"><div className="k">Net profit</div>
-            <div className={`v ${rBase.netProfit < 0 ? 'neg' : rBase.netProfit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.netProfit)}</div>
-            <div className="s">after {s.taxPct}% tax</div></div>
+          <div className="hero"><div className="k">Max offer</div>
+            <div className="v">{money0(mao)}</div>
+            <div className="s">for {money0(s.minProfit)} pre-tax</div></div>
+          <div><div className="k">Pre-tax profit</div>
+            <div className={`v ${rBase.preTaxProfit < 0 ? 'neg' : rBase.preTaxProfit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.preTaxProfit)}</div>
+            <div className="s">{pct(rBase.marginPreTax)} of ARV</div></div>
+          <div><div className="k">After tax</div><div className="v">{money(rBase.netProfit)}</div>
+            <div className="s">{s.taxPct}% blended</div></div>
           <div><div className="k">ROI on cash</div><div className="v">{pct(rBase.roi)}</div>
             <div className="s">{money0(rBase.peakCash)} invested</div></div>
           <div><div className="k">Annualized</div><div className="v">{pct(rBase.annualizedRoi)}</div>
             <div className="s">{Math.round(rBase.holdMonths * 30.4375)}-day hold</div></div>
-          <div><div className="k">Margin % of ARV</div><div className="v">{pct(rBase.marginPreTax)}</div>
-            <div className="s">pre-tax</div></div>
-          <div><div className="k">Max offer</div><div className="v">{money0(mao)}</div>
-            <div className="s">70% rule: {money0(seventyRule(s))}</div></div>
         </div>
 
         <div className="sheet"><table className="ss with-notes">
@@ -817,28 +796,9 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
           <R label="Blended tax rate" unit="%"
             note="Flip profit is ordinary income and likely dealer property — no capital gains, no 1031. 40–50% combined is typical.">
             <Num value={s.taxPct} onChange={v => set('taxPct', v)} /></R>
-          <R label="A loss shelters other income" note="Off by default so a bad deal shows its full loss." ctl={
-            <Switch checked={s.lossOffsetsIncome} onChange={v => set('lossOffsetsIncome', v)} />} />
           <V cls="tot" label="Your floor, after tax" value={money0(floorAfterTax)}
             note={<>What {money0(s.minProfit)} pre-tax is worth once {s.taxPct}% tax is paid — the line the grid below colours against.</>} />
         </tbody></table></div>
-
-        <div className="sheet">
-          <table className="ss"><tbody>
-            <Band span={4} tag="sale price down to net profit">Where the money goes</Band>
-          </tbody></table>
-          <div style={{ padding: 'var(--space-3)' }}>
-            <Waterfall steps={waterfall} sale={rBase.sale} />
-            <p className="footnote" style={{ marginTop: 'var(--space-2)' }}>
-              Each bar starts where the balance above it ends, so its length is the slice that cost
-              takes out of the deal. On this deal the largest single line after the purchase itself is
-              {' '}<b>{[...waterfall].filter(w => w.kind === 'cost' && w.id !== 'purchase')
-                    .sort((a, b) => b.amount - a.amount)[0]?.label.toLowerCase()}</b>{' '}
-              at {money0([...waterfall].filter(w => w.kind === 'cost' && w.id !== 'purchase')
-                    .sort((a, b) => b.amount - a.amount)[0]?.amount ?? 0)}.
-            </p>
-          </div>
-        </div>
 
         <div className="notice"><div>{seventyRule(s) < mao
           ? `The 70% rule is stricter than your own numbers by ${money0(mao - seventyRule(s))}. It assumes financing and selling costs that Bay Area price points don't match, so trust your MAO.`
@@ -899,51 +859,52 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
 
         <div className="sheet scrollx"><table className="ss pl">
           <thead>
-            <Band span={4} tag={`rehab budget ${money0(rBase.rehabTotal)}`}>Deal model</Band>
+            <Band span={5} tag={`rehab budget ${money0(rBase.rehabTotal)}`}>Deal model</Band>
             <tr>
               <th className="lb">Scenario</th>
               {SCENARIO_KEYS.map((k, i) => (
                 <th key={k} className={`n${i === selIdx ? ' on' : ''}`}>ARV {k}<br />{money0(s.arv[k])}</th>
               ))}
+              <th className="sh">% of sale</th>
             </tr>
           </thead>
           <tbody>
-            <Sec span={4}>Scope &amp; timeline</Sec>
+            <Sec span={5}>Scope &amp; timeline</Sec>
             <PL label="Rehab budget" pick={r => r.rehabTotal} fmt={money0} />
-            <PL label="Total hold period — months" pick={r => r.holdMonths} fmt={n => n.toFixed(1)} />
+            <PL label="Total hold period — months" pick={r => r.holdMonths} fmt={n => n.toFixed(1)} share={false} />
 
-            <Sec span={4}>Sale proceeds</Sec>
+            <Sec span={5}>Sale proceeds</Sec>
             <PL label="Gross sale price (ARV)" pick={r => r.sale} fmt={money0} />
             <Fold id="sell" label="Less selling costs" pick={r => r.sellTotal} lines={cols[selIdx].sellLines} />
             <PL cls="tot" label="Net sale proceeds" pick={r => r.netProceeds} fmt={money0} />
 
-            <Sec span={4}>Cost into the deal</Sec>
+            <Sec span={5}>Cost into the deal</Sec>
             <PL label="Purchase price" pick={() => s.price} />
             <Fold id="acq" label="Acquisition costs" pick={r => r.acqTotal} lines={cols[selIdx].acqLines} />
             <PL label="Rehab budget" pick={r => r.rehabTotal} />
             <Fold id="hold" label="Holding costs" pick={r => r.holdTotal} lines={cols[selIdx].holdLines} />
             <Fold id="fin" label="Financing cost" pick={r => r.finTotal} lines={cols[selIdx].finLines} />
 
-            <Sec span={4}>Result</Sec>
+            <Sec span={5}>Result</Sec>
             <PL cls="tot" label="Pre-tax profit / (loss)" pick={r => r.preTaxProfit} fmt={money} />
             <PL label={`Income tax at ${s.taxPct}%`} pick={r => r.tax} />
             <PL cls="grand" label="Net profit after tax" pick={r => r.netProfit} fmt={money} />
 
-            <Sec span={4}>Returns</Sec>
-            <PL label="Return on cash — after tax" pick={r => r.roi} fmt={pct} />
-            <PL label="Annualized return" pick={r => r.annualizedRoi} fmt={pct} />
-            <PL label="Margin — % of ARV, pre-tax" pick={r => r.marginPreTax} fmt={pct} />
+            <Sec span={5}>Returns</Sec>
+            <PL label="Return on cash — after tax" pick={r => r.roi} fmt={pct} share={false} />
+            <PL label="Annualized return" pick={r => r.annualizedRoi} fmt={pct} share={false} />
+            <PL label="Margin — % of ARV, pre-tax" pick={r => r.marginPreTax} fmt={pct} share={false} />
 
-            <Sec span={4}>Capital</Sec>
-            <PL label="Cash to close" pick={r => r.cashToClose} fmt={money0} />
-            <PL label="Cash during hold" pick={r => r.cashDuringHold} fmt={money0} />
-            <PL cls="tot" label="Peak cash out of pocket" pick={r => r.peakCash} fmt={money0} />
-            <PL label="Loan payoff at sale" pick={r => r.payoffAtSale} fmt={money0} />
-            <PL label="Cash back at close" pick={r => r.cashBackAtClose} fmt={money} />
+            <Sec span={5}>Capital</Sec>
+            <PL label="Cash to close" pick={r => r.cashToClose} fmt={money0} share={false} />
+            <PL label="Cash during hold" pick={r => r.cashDuringHold} fmt={money0} share={false} />
+            <PL cls="tot" label="Peak cash out of pocket" pick={r => r.peakCash} fmt={money0} share={false} />
+            <PL label="Loan payoff at sale" pick={r => r.payoffAtSale} fmt={money0} share={false} />
+            <PL label="Cash back at close" pick={r => r.cashBackAtClose} fmt={money} share={false} />
             {rBase.principalPaid > 0 &&
-              <PL label="Principal repaid — returns at close" pick={r => r.principalPaid} fmt={money0} />}
+              <PL label="Principal repaid — returns at close" pick={r => r.principalPaid} fmt={money0} share={false} />}
             {rBase.withholding > 0 &&
-              <PL label="CA withholding at close" pick={r => r.withholding} fmt={money0} />}
+              <PL label="CA withholding at close" pick={r => r.withholding} fmt={money0} share={false} />}
           </tbody>
         </table></div>
       </section>
@@ -994,11 +955,11 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
         <div className="sheet"><table className="ss"><tbody>
           <Band tag="drives every room below">Property</Band>
           <R label="Square feet"><Money value={sqft} onChange={v => setProp('sqft', v)} /></R>
-          <R label="Bedrooms"><Num value={s.prop.beds} onChange={v => setProp('beds', v)} /></R>
-          <R label="Full baths"><Num value={s.prop.baths} onChange={v => setProp('baths', v)} /></R>
-          <R label="Half baths"><Num value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} /></R>
-          <R label="Stories"><Num value={s.prop.stories} onChange={v => setProp('stories', v)} /></R>
-          <R label="Garage bays"><Num value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} /></R>
+          <R label="Bedrooms" ctl={<Count value={s.prop.beds} onChange={v => setProp('beds', v)} max={10} />} />
+          <R label="Full baths" ctl={<Count value={s.prop.baths} onChange={v => setProp('baths', v)} max={10} />} />
+          <R label="Half baths" ctl={<Count value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} max={5} />} />
+          <R label="Stories" ctl={<Count value={s.prop.stories} onChange={v => setProp('stories', v)} max={4} from={1} />} />
+          <R label="Garage bays" ctl={<Count value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} max={4} />} />
         </tbody></table></div>
 
         {spaces.map(sp => {

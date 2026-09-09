@@ -176,7 +176,6 @@ export interface FlipState {
   prepayPct: number;
 
   taxPct: number;
-  lossOffsetsIncome: boolean;
   /** the walk-away floor, always measured pre-tax */
   minProfit: number;
   /** California sellers normally deliver a disclosure package before offers */
@@ -254,7 +253,6 @@ export function defaultFlipState(): FlipState {
     prepayPct: 0,
 
     taxPct: 45,
-    lossOffsetsIncome: false,
     minProfit: 75000,
     sellerDisclosure: true,
 
@@ -504,9 +502,10 @@ export function computeFlip(
   /* ---------- the P&L ---------- */
   const netProceeds = sale - sellTotal;
   const preTaxProfit = netProceeds - price - acqTotal - rehabTotal - holdTotal - finTotal;
-  const tax = preTaxProfit > 0
-    ? preTaxProfit * (s.taxPct / 100)
-    : (s.lossOffsetsIncome ? preTaxProfit * (s.taxPct / 100) : 0);
+  /* A loss carries no tax. Whether it shelters other income is a question for
+     your return, not for a screening model — assuming it here would flatter
+     every bad deal. */
+  const tax = preTaxProfit > 0 ? preTaxProfit * (s.taxPct / 100) : 0;
   const netProfit = preTaxProfit - tax;
 
   /* ---------- capital ----------
@@ -623,44 +622,6 @@ export function verdictFor(r: FlipResult, s: FlipState): { v: Verdict; title: st
   }
   return { v: 'good', title: 'Clears your floor', sub: 'Base case beats your minimum pre-tax profit with room for the ARV to slip.' };
 }
-
-/* ------------------------------------------------------------------ waterfall */
-
-export interface WaterfallStep {
-  id: string;
-  label: string;
-  /** always positive — `kind` says which direction it moves the balance */
-  amount: number;
-  kind: 'start' | 'cost' | 'result';
-  /** running balance once this step has been applied */
-  balance: number;
-  /** share of the sale price, for the label */
-  share: number;
-}
-
-/** Sale price down to net profit, one step per cost group. Built here rather
-    than in the UI so the arithmetic that the picture asserts — every step
-    lands on the balance the P&L reports — is testable. */
-export function buildWaterfall(s: FlipState, r: FlipResult): WaterfallStep[] {
-  const steps: WaterfallStep[] = [];
-  let bal = r.sale;
-  const share = (n: number) => (r.sale > 0 ? (n / r.sale) * 100 : 0);
-  steps.push({ id: 'sale', label: 'Sale price', amount: r.sale, kind: 'start', balance: bal, share: 100 });
-  const cost = (id: string, label: string, amount: number) => {
-    bal -= amount;
-    steps.push({ id, label, amount, kind: 'cost', balance: bal, share: share(amount) });
-  };
-  cost('purchase', 'Purchase price', priceOf(s));
-  cost('rehab', 'Rehab', r.rehabTotal);
-  cost('sell', 'Selling costs', r.sellTotal);
-  cost('fin', 'Financing', r.finTotal);
-  cost('hold', 'Holding costs', r.holdTotal);
-  cost('acq', 'Acquisition costs', r.acqTotal);
-  cost('tax', `Income tax at ${s.taxPct}%`, r.tax);
-  steps.push({ id: 'net', label: 'Net profit', amount: bal, kind: 'result', balance: bal, share: share(bal) });
-  return steps;
-}
-const priceOf = (s: FlipState) => s.price;
 
 /** Cities helper re-exported so the UI has one import for flip concerns. */
 export type { CityPreset };
