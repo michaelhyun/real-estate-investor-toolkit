@@ -15,11 +15,12 @@
    A deal owns what is specific to it (what is checked, quantity overrides) and
    never a copy of the prices. */
 
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   defaultFlipState, computeFlip, solveMAO, seventyRule, buildSensitivity,
   verdictFor, SELLER_PROVIDED, SCENARIO_KEYS, ACQ_ITEMS, HOLD_ITEMS, SELL_FLAT_ITEMS,
-  citiesByCounty, findCity,
+  citiesByCounty, findCity, listingLinks,
   buildSpaces, computeSow, applyLevel, taskKey, taskQty, taskCost, priceKey, DEF_BY_KIND, LEVEL_LABELS,
   money, money0, pct, parseNum,
   type FlipState, type ScenarioKey, type CostLine, type FlipResult,
@@ -70,6 +71,9 @@ function normalizeFlip(d: any): FlipState {
       ? Math.round(d.minProfit / (1 - (d.taxPct ?? 45) / 100))
       : (d.minProfit ?? base.minProfit),
     sellerDisclosure: d.sellerDisclosure ?? base.sellerDisclosure,
+    liveIn: d.liveIn ?? base.liveIn,
+    occupancyMonths: d.occupancyMonths ?? base.occupancyMonths,
+    avoidedHousing: d.avoidedHousing ?? base.avoidedHousing,
     buySideCommPct: d.buySideCommPct ?? base.buySideCommPct,
     acq: { ...base.acq, ...(d.acq || {}) },
     hold: { ...base.hold, ...(d.hold || {}) },
@@ -117,6 +121,9 @@ const compact = (n: number) => {
 /** Accounting style: a cost reads in parentheses, the way it does on paper. */
 const paren = (n: number) => n === 0 ? '—' : `(${money0(n)})`;
 const psf = (v: number, sqft: number) => sqft > 0 ? `${money0(v / sqft)}/sf` : '';
+/** Days read naturally up to about a year; past that nobody counts in days. */
+const holdLabel = (months: number) =>
+  months >= 18 ? `${(months / 12).toFixed(1)} yrs` : `${Math.round(months * 30.4375)} days`;
 
 /* ================================================================== the page */
 
@@ -211,6 +218,8 @@ export default function FlipPage() {
   });
   const allShut = ASSUM_SECS.every(id => shutSecs[id]);
 
+  const links = useMemo(() => listingLinks(s.prop.address), [s.prop.address]);
+
   const rBase = useMemo(() => computeFlip(s, 'base'), [s]);
   /* rehab is one budget now, so the P&L compares the three ARV scenarios */
   const cols = useMemo(() => SCENARIO_KEYS.map(k => computeFlip(s, k)), [s]);
@@ -231,11 +240,15 @@ export default function FlipPage() {
     : rBase.rehabPsf <= 350
       ? <span className="ok">gut territory</span>
       : <span className="warn">above a normal gut — check the scope</span>;
-  const holdVerdict = rBase.holdMonths <= 8
-    ? <span className="ok">normal</span>
-    : rBase.holdMonths <= 11
-      ? <span className="warn">long — carry costs compound</span>
-      : <span className="bad">very long for a flip</span>;
+  const holdVerdict = s.liveIn
+    ? (rBase.occupancyMonths >= 24
+        ? <span className="ok">past the two-year mark</span>
+        : <span className="bad">under two years — you lose the reason to do it this way</span>)
+    : rBase.holdMonths <= 8
+      ? <span className="ok">normal</span>
+      : rBase.holdMonths <= 11
+        ? <span className="warn">long — carry costs compound</span>
+        : <span className="bad">very long for a flip</span>;
   const sellVerdict = rBase.sellPctOfSale <= 9
     ? <span className="ok">in range</span>
     : <span className="warn">above the usual 7–9%</span>;
@@ -396,6 +409,16 @@ export default function FlipPage() {
           </div>
         </div>
 
+        {/* Plain anchors, so the address goes nowhere until you click one. */}
+        {links.length > 0 && (
+          <div className="listing-links">
+            <span className="ll-lb">Look it up</span>
+            {links.map(l => (
+              <a key={l.id} className={`ll${l.kind === 'search' ? ' search' : ''}`} href={l.href}
+                target="_blank" rel="noopener noreferrer" title={l.title}>{l.label}</a>
+            ))}
+          </div>
+        )}
       </div>
 
       <nav className="tabs">
@@ -435,10 +458,29 @@ export default function FlipPage() {
           <div><div className="k">Gross spread</div><div className="v">{pct(rBase.grossSpread)}</div>
             <div className="s">target 25–30%</div></div>
           <div><div className="k">All-in cost</div><div className="v">{money0(allIn)}</div>
-            <div className="s">{psf(allIn, sqft)} · {Math.round(rBase.holdMonths * 30.4375)} days</div></div>
+            <div className="s">{psf(allIn, sqft)} · {holdLabel(rBase.holdMonths)}</div></div>
         </div>
 
         {city?.note && <div className="notice warn"><div><b>{city.name}</b>{city.note}</div></div>}
+
+        {s.liveIn && (
+          <div className="notice">
+            <div><b>Why the two years are the whole point</b>
+              Live there 24 of the last 60 months and the gain stops being ordinary flip income taxed at
+              your full rate plus self-employment tax. It becomes a long-term capital gain, and §121
+              excludes the first $250,000 of it, $500,000 if you are married. None of that is computed
+              here — the <Link href="/tax">Income Tax Calculator</Link> has both.</div>
+          </div>
+        )}
+        {s.liveIn && s.finMode === 'hard' && (
+          <div className="notice warn">
+            <div><b>Hard money does not stretch to {holdLabel(rBase.holdMonths)}</b>
+              A bridge loan at {s.hardRate}% is priced for months and most lenders will not extend one
+              past 18. Living there makes you owner-occupied, which prices below an investment loan
+              rather than above it.</div>
+            <div className="act"><button onClick={() => set('finMode', 'conv')}>Switch to conventional</button></div>
+          </div>
+        )}
 
         <div className="sow-bar">
           <button className="btn" onClick={() => setShutSecs(
@@ -518,9 +560,11 @@ export default function FlipPage() {
             <Money value={s.rehab.high} onChange={v => setRehab('high', v)} /></R>
           </>}
 
-          <Band span={5} {...fold('time')} tag={`${Math.round(rBase.holdMonths * 30.4375)} days`}>Timeline</Band>
+          <Band span={5} {...fold('time')} tag={holdLabel(rBase.holdMonths)}>Timeline</Band>
           {secOpen('time') && <>
-          <G>Every extra day costs holding <b>and</b> interest at once. Bay Area flips run <b>150–240 days</b> door to door. Yours is {Math.round(rBase.holdMonths * 30.4375)} — {holdVerdict}.</G>
+          <G>{s.liveIn
+            ? <>You live here, so the clock is set by the <b>two-year</b> residency rather than by carry. Yours is {rBase.occupancyMonths.toFixed(0)} months occupied — {holdVerdict}.</>
+            : <>Every extra day costs holding <b>and</b> interest at once. Bay Area flips run <b>150–240 days</b> door to door. Yours is {Math.round(rBase.holdMonths * 30.4375)} — {holdVerdict}.</>}</G>
           <R label="Rehab duration" unit="days" amount={`${(s.rehabDays / 30.4375).toFixed(1)} mo`}
             note="Fold permits in. Bay Area plan check adds 60–120 days before a shovel moves.">
             <Num value={s.rehabDays} onChange={v => set('rehabDays', v)} /></R>
@@ -533,9 +577,16 @@ export default function FlipPage() {
           <R label="Schedule overrun" unit="days" amount={`${(s.overrunDays / 30.4375).toFixed(1)} mo`}
             note="Add days to see what a slip costs. The cheapest stress test here.">
             <Num value={s.overrunDays} onChange={v => set('overrunDays', v)} /></R>
-          <V cls="tot" label="Total hold period" value={`${Math.round(rBase.holdMonths * 30.4375)} days`}
+          {s.liveIn && (
+            <R label="Months you live there" unit="mo" amount={`${(s.occupancyMonths / 12).toFixed(1)} yrs`}
+              note="Between finishing the work and listing. The days on market and escrow above also count toward the two years, so 22 here already clears it.">
+              <Num value={s.occupancyMonths} onChange={v => set('occupancyMonths', v)} /></R>
+          )}
+          <V cls="tot" label="Total hold period" value={holdLabel(rBase.holdMonths)}
             unit={`${rBase.holdMonths.toFixed(1)} mo`}
-            note={<>A 30-day slip costs roughly {money0(rBase.holdMonthly + rBase.interest / Math.max(1, rBase.holdMonths))}.</>} />
+            note={s.liveIn
+              ? <>{rBase.vacantMonths.toFixed(1)} months empty, {rBase.occupancyMonths.toFixed(0)} lived in. Only the empty months carry a vacant house.</>
+              : <>A 30-day slip costs roughly {money0(rBase.holdMonthly + rBase.interest / Math.max(1, rBase.holdMonths))}.</>} />
           </>}
 
           <Band span={5} {...fold('acq')} tag={money0(rBase.acqTotal)}>Acquisition costs</Band>
@@ -567,8 +618,19 @@ export default function FlipPage() {
             note="Loan points are not here — they live under Financing." />
           </>}
 
-          <Band span={5} {...fold('hold')} tag={`${money0(rBase.holdTotal)} · ${money0(rBase.holdMonthly)}/mo`}>Holding costs</Band>
+          <Band span={5} {...fold('hold')}
+            tag={`${money0(rBase.holdTotal)}${s.liveIn ? ' · live-in' : ` · ${money0(rBase.holdMonthly)}/mo`}`}>Holding costs</Band>
           {secOpen('hold') && <>
+          <R label="Live-in flip"
+            hint={s.liveIn ? `${rBase.occupancyMonths.toFixed(0)} months occupied` : undefined}
+            note="You move in, hold past two years, then sell. The months you live there are not vacant, so an empty house's costs never happen — and the housing you would have paid for anyway is not a cost of the deal." ctl={
+            <Switch checked={s.liveIn} onChange={v => set('liveIn', v)} />} />
+          {s.liveIn && (
+            <R label="Housing you would have paid anyway" unit="$/mo"
+              amount={money0(s.avoidedHousing * rBase.occupancyMonths)}
+              note={<>Rent on the place you would otherwise live. {money0(rBase.housingCredit)} of it is credited back, capped at what those months actually cost you.</>}>
+              <Money value={s.avoidedHousing} onChange={v => set('avoidedHousing', v)} /></R>
+          )}
           <R label="Levied property tax rate" unit="%" amount={money0(rBase.propertyTax)}
             note="1% Prop 13 base plus local bonds. A published “effective rate” understates this by a third.">
             <Num value={s.taxRatePct} onChange={v => set('taxRatePct', v)} /></R>
@@ -584,10 +646,25 @@ export default function FlipPage() {
             </div>} />
           <Sec span={5}>Monthly operating — enter $/mo, total over the hold at right</Sec>
           {HOLD_ITEMS.map(i => (
-            <R key={i.id} label={i.label} note={i.note} unit="$/mo"
-              amount={money0((s.hold[i.id] ?? 0) * rBase.holdMonths)}>
+            <R key={i.id} label={i.label} unit="$/mo"
+              note={s.liveIn && i.vacantOnly
+                ? <>Empty months only — nobody is living there to need it. {i.note}</>
+                : i.note}
+              amount={money0(amt(rBase.holdLines, i.id))}>
               <Money value={s.hold[i.id] ?? 0} onChange={v => setMap('hold', i.id, v)} /></R>
           ))}
+          {rBase.housingCredit > 0 && (() => {
+            /* only the share that lands in THIS table, so the column adds up —
+               the rest offsets interest and is shown under Financing */
+            const here = Math.abs(amt(rBase.holdLines, 'housingCredit'));
+            const elsewhere = rBase.housingCredit - here;
+            return (
+              <V label="Housing you would have paid for anyway" value={`(${money0(here)})`}
+                note={elsewhere > 0
+                  ? <>Covers this carry in full. The other {money0(elsewhere)} offsets interest, under Financing.</>
+                  : <>{rBase.occupancyMonths.toFixed(0)} months at {money0(s.avoidedHousing)}/mo.</>} />
+            );
+          })()}
           <V cls="tot" label={`Total over ${rBase.holdMonths.toFixed(1)} months`} value={money0(rBase.holdTotal)}
             note={<>{pct(s.arv.base > 0 ? rBase.holdTotal / s.arv.base * 100 : 0)} of ARV. Runs whether or not anyone is working on the house.</>} />
           </>}
@@ -739,7 +816,7 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
           <div><div className="k">ROI on cash</div><div className="v">{pct(rBase.roi)}</div>
             <div className="s">{money0(rBase.peakCash)} invested</div></div>
           <div><div className="k">Annualized</div><div className="v">{pct(rBase.annualizedRoi)}</div>
-            <div className="s">{Math.round(rBase.holdMonths * 30.4375)}-day hold</div></div>
+            <div className="s">{holdLabel(rBase.holdMonths)} hold</div></div>
         </div>
 
         <div className="sheet"><table className="ss with-notes">
@@ -804,7 +881,7 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
             </div>
             <p className="footnote">
               Axes span your low-to-high ARV and rehab scenarios with 10% headroom past each end.
-              Purchase price ({money0(s.price)}), timeline ({Math.round(rBase.holdMonths * 30.4375)} days),
+              Purchase price ({money0(s.price)}), timeline ({holdLabel(rBase.holdMonths)}),
               and financing are held fixed.
               {city && city.tiers.length > 1 && ' This city has a transfer tax cliff, so expect a step wherever the ARV range crosses it.'}
             </p>
@@ -999,7 +1076,8 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
         Transfer tax and property tax presets carry the date they were verified; rates change by ballot
         measure, so confirm before relying on them. Property tax assumes Prop 13 reassessment to the
         purchase price. Every profit figure here is before income tax — a flip is ordinary income and
-        also owes self-employment tax, which the Income Tax Calculator models separately.
+        also owes self-employment tax, which the <Link href="/tax">Income Tax Calculator</Link> models
+        separately, along with the §121 exclusion a live-in flip is chasing.
       </p>
     </>
   );

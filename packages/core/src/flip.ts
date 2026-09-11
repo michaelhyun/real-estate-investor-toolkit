@@ -43,6 +43,9 @@ export interface LineDef {
   /** guidance for the notes column — where the number comes from, what range is
       normal, and when to move it. Written for someone doing their first flip. */
   note?: string;
+  /** a cost that exists *because* the house is empty. On a live-in flip those
+      months are not vacant, so the line simply does not happen. */
+  vacantOnly?: boolean;
 }
 
 /** Acquisition costs. Loan points and lender fees are deliberately absent —
@@ -76,17 +79,17 @@ export const ACQ_ITEMS: LineDef[] = [
     County cities need a certificate at sale, so it is worth your own eyes. */
 export const SELLER_PROVIDED = new Set(['inspGeneral', 'inspPest', 'inspFoundation', 'inspRoof']);
 
-/** Holding costs, all $/month over the hold period. */
+/** Holding costs, all $/month over the months the house is carried. */
 export const HOLD_ITEMS: LineDef[] = [
-  { id: 'insVacant', label: 'Vacant dwelling insurance', val: 350,
+  { id: 'insVacant', label: 'Vacant dwelling insurance', val: 350, vacantOnly: true,
     note: '$250\u2013450/mo and not optional \u2014 an HO-3 voids once unoccupied.' },
   { id: 'electric', label: 'Electricity', val: 90, note: 'Construction power runs well above a lived-in bill.' },
   { id: 'water', label: 'Water', val: 60, note: 'Keep it on for the trades and for landscaping.' },
   { id: 'gas', label: 'Gas', val: 40, note: 'Often off during a gut, back on for staging.' },
   { id: 'trash', label: 'Trash', val: 30, note: 'Separate from demo dumpsters, which sit in rehab.' },
-  { id: 'landscape', label: 'Landscaping & site upkeep', val: 150,
+  { id: 'landscape', label: 'Landscaping & site upkeep', val: 150, vacantOnly: true,
     note: 'An overgrown yard reads as distressed. Cheap insurance.' },
-  { id: 'security', label: 'Security — alarm & cameras', val: 85,
+  { id: 'security', label: 'Security — alarm & cameras', val: 85, vacantOnly: true,
     note: 'Copper theft and squatting are real on a vacant house.' },
   { id: 'hoa', label: 'HOA dues', val: 0, note: 'Condos and PUDs only. Check for a special assessment first.' },
   { id: 'entity', label: 'Entity, bookkeeping, misc', val: 100,
@@ -129,6 +132,15 @@ export interface FlipState {
 
   rehabSource: 'manual' | 'checklist';
   rehab: Triple;
+
+  /* A live-in flip: you move in, hold past the two-year mark, then sell. The
+     months you live there are not vacant, so the costs of an empty house are
+     not incurred, and the housing you would have paid for anyway is not a
+     cost of the project. */
+  liveIn: boolean;
+  occupancyMonths: number;
+  /** what housing would have cost you regardless, $/mo */
+  avoidedHousing: number;
 
   /* timeline — every phase in days, because that is how they are quoted */
   rehabDays: number;
@@ -210,6 +222,10 @@ export function defaultFlipState(): FlipState {
     rehabSource: 'manual',
     rehab: { low: 180000, base: 220000, high: 285000 },
 
+    liveIn: false,
+    occupancyMonths: 24,
+    avoidedHousing: 3800,
+
     rehabDays: 150,
     domDays: 21,
     escrowDays: 30,
@@ -285,7 +301,13 @@ export interface FlipResult {
 
   rehabPeriod: number;
   marketMonths: number;
+  /** months lived in — zero unless this is a live-in flip */
+  occupancyMonths: number;
+  /** months the house stands empty, which is what a vacancy cost accrues over */
+  vacantMonths: number;
   holdMonths: number;
+  /** housing you would have paid for anyway, credited back against the carry */
+  housingCredit: number;
 
   acqLines: CostLine[];
   acqTotal: number;
@@ -344,7 +366,11 @@ export function computeFlip(
 
   const rehabPeriod = Math.max(0, (s.rehabDays + s.overrunDays) / DAYS_PER_MONTH);
   const marketMonths = Math.max(0, (s.domDays + s.escrowDays) / DAYS_PER_MONTH);
-  const holdMonths = rehabPeriod + marketMonths;
+  const occupancyMonths = s.liveIn ? Math.max(0, s.occupancyMonths) : 0;
+  /* Empty during the work and again while it is on the market; lived in for
+     the stretch between. Only the empty months carry a vacant house's costs. */
+  const vacantMonths = rehabPeriod + marketMonths;
+  const holdMonths = vacantMonths + occupancyMonths;
 
   /* ---------- acquisition ----------
      `transferPayer` is seeded from the city preset when a city is picked, but
@@ -376,9 +402,21 @@ export function computeFlip(
     : 0;
 
   const holdMonthly = HOLD_ITEMS.reduce((a, i) => a + (s.hold[i.id] ?? 0), 0);
+  /* Builder's risk covers an open structure, not a household, so it runs over
+     the empty months only. On an ordinary flip every month is empty and this
+     is the figure it always was. */
   const builderRiskTotal = s.builderRiskUnit === '%'
     ? rehabTotal * (s.builderRisk / 100)
-    : s.builderRisk * holdMonths;
+    : s.builderRisk * vacantMonths;
+
+  const monthsFor = (i: LineDef) => i.vacantOnly ? vacantMonths : holdMonths;
+  const holdItemsTotal = HOLD_ITEMS.reduce((a, i) => a + (s.hold[i.id] ?? 0) * monthsFor(i), 0);
+
+  /* What the occupied months cost in holding terms. The interest over those
+     months belongs in the comparison too, but it is not computed until the
+     financing block below, so the credit itself is settled there. */
+  const occupiedHolding = propertyTax * (holdMonths > 0 ? occupancyMonths / holdMonths : 0)
+    + HOLD_ITEMS.reduce((a, i) => a + (i.vacantOnly ? 0 : (s.hold[i.id] ?? 0)), 0) * occupancyMonths;
 
   const holdLines: CostLine[] = [
     { id: 'propertyTax', label: 'Property tax — reassessed at purchase price', amount: propertyTax,
@@ -388,11 +426,14 @@ export function computeFlip(
            hint: 'The separate bill for the gap between the seller’s roll value and yours' }]
       : []),
     { id: 'builderRisk', label: "Builder's risk insurance", amount: builderRiskTotal },
-    ...HOLD_ITEMS.map(i => ({ id: i.id, label: i.label, amount: (s.hold[i.id] ?? 0) * holdMonths, hint: i.hint })),
+    ...HOLD_ITEMS.map(i => ({
+      id: i.id, label: i.label, amount: (s.hold[i.id] ?? 0) * monthsFor(i),
+      hint: s.liveIn && i.vacantOnly ? 'Empty months only — nobody is living there to need it' : i.hint,
+    })),
   ];
   /* the supplemental row is disclosure inside the property-tax figure, so it is
      shown but never added again */
-  const holdTotal = propertyTax + builderRiskTotal + holdMonthly * holdMonths;
+  const holdGross = propertyTax + builderRiskTotal + holdItemsTotal;
 
   /* ---------- selling ---------- */
   const sellShare = payerShare(s.transferPayer, 'sell');
@@ -492,7 +533,39 @@ export function computeFlip(
     );
     if (prepay > 0) finLines.push({ id: 'prepay', label: 'Prepayment penalty', amount: prepay, phase: 'hold', derived: true });
   }
-  const finTotal = finLines.reduce((a, l) => a + l.amount, 0);
+  const finGross = finLines.reduce((a, l) => a + l.amount, 0);
+
+  /* ---------- the live-in credit ----------
+     Housing you would have paid for anyway is not a cost of the project. The
+     credit stops at what those months actually cost to live in — the holding
+     costs plus the interest over them — because renting somewhere cheaper is
+     a saving on your household budget, not profit the deal earned. Interest
+     is apportioned evenly, which understates an amortizing loan's front-loaded
+     years and so errs toward the conservative side.
+
+     It is then split across the two blocks it offsets rather than dumped on
+     one, so neither subtotal goes negative and each line says what it paid
+     for: you were buying shelter with both the carry and the interest. */
+  const occupiedInterest = interest * (holdMonths > 0 ? occupancyMonths / holdMonths : 0);
+  const housingCredit = Math.min(
+    Math.max(0, s.avoidedHousing) * occupancyMonths, occupiedHolding + occupiedInterest);
+  const holdCredit = Math.min(housingCredit, occupiedHolding);
+  const finCredit = housingCredit - holdCredit;
+  const monthsLabel = `${Math.round(occupancyMonths)} months living there instead of renting`;
+  if (holdCredit > 0) {
+    holdLines.push({
+      id: 'housingCredit', label: 'Housing you would have paid for anyway',
+      amount: -holdCredit, phase: 'hold', derived: true, hint: monthsLabel,
+    });
+  }
+  if (finCredit > 0) {
+    finLines.push({
+      id: 'housingCreditInterest', label: 'Interest you would have paid as rent',
+      amount: -finCredit, phase: 'hold', derived: true, hint: monthsLabel,
+    });
+  }
+  const holdTotal = holdGross - holdCredit;
+  const finTotal = finGross - finCredit;
 
   /* ---------- the P&L ---------- */
   const netProceeds = sale - sellTotal;
@@ -520,7 +593,7 @@ export function computeFlip(
   const sqft = s.prop.sqft || 0;
   return {
     sale, rehabTotal,
-    rehabPeriod, marketMonths, holdMonths,
+    rehabPeriod, marketMonths, occupancyMonths, vacantMonths, holdMonths, housingCredit,
     acqLines, acqTotal,
     holdLines, holdTotal, holdMonthly, propertyTax, supplementalTax,
     sellLines, sellTotal, sellPctOfSale: sale > 0 ? sellTotal / sale * 100 : 0,

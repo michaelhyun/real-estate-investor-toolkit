@@ -629,6 +629,98 @@ describe('seller disclosure package', () => {
   });
 });
 
+describe('live-in flip', () => {
+  const amt = (lines: { id?: string; amount: number }[], id: string) =>
+    lines.find(l => l.id === id)?.amount ?? 0;
+
+  it('is inert until you turn it on, whatever the occupancy figure says', () => {
+    const a = computeFlip(base({ liveIn: false, occupancyMonths: 24 }));
+    const b = computeFlip(base({ liveIn: false, occupancyMonths: 0 }));
+    near(a.holdMonths, b.holdMonths, 0.01);
+    near(a.occupancyMonths, 0);
+    near(a.housingCredit, 0);
+  });
+
+  it('adds the months you live there to the hold', () => {
+    const off = computeFlip(base({ liveIn: false }));
+    const on = computeFlip(base({ liveIn: true, occupancyMonths: 24 }));
+    near(on.holdMonths, off.holdMonths + 24, 0.01);
+    near(on.vacantMonths, off.holdMonths, 0.01);
+  });
+
+  it('stops charging for an empty house during the months it is occupied', () => {
+    const s = base({ liveIn: true, occupancyMonths: 24, avoidedHousing: 0 });
+    const r = computeFlip(s);
+    const vacant = amt(r.holdLines, 'insVacant');
+    /* vacancy insurance accrues over the empty months, not the whole hold */
+    near(vacant, (s.hold.insVacant ?? 0) * r.vacantMonths, 1);
+    expect(vacant).toBeLessThan((s.hold.insVacant ?? 0) * r.holdMonths);
+  });
+
+  it('keeps charging for the things you pay whether or not you live there', () => {
+    const s = base({ liveIn: true, occupancyMonths: 24, avoidedHousing: 0 });
+    const r = computeFlip(s);
+    near(amt(r.holdLines, 'hoa'), (s.hold.hoa ?? 0) * r.holdMonths, 1);
+    near(amt(r.holdLines, 'entity'), (s.hold.entity ?? 0) * r.holdMonths, 1);
+  });
+
+  it("drops builder's risk for the occupied months — it covers an open structure", () => {
+    const s = base({ liveIn: true, occupancyMonths: 24, builderRiskUnit: '$' as const });
+    const r = computeFlip(s);
+    near(amt(r.holdLines, 'builderRisk'), s.builderRisk * r.vacantMonths, 1);
+  });
+
+  it('credits the housing you would have paid for anyway', () => {
+    const none = computeFlip(base({ liveIn: true, occupancyMonths: 24, avoidedHousing: 0 }));
+    const some = computeFlip(base({ liveIn: true, occupancyMonths: 24, avoidedHousing: 2000 }));
+    expect(some.housingCredit).toBeGreaterThan(0);
+    /* the credit comes off the carry as a whole; which block absorbs which
+       part is presentation, so the invariant is on the sum */
+    near(some.holdTotal + some.finTotal,
+         none.holdTotal + none.finTotal - some.housingCredit, 1);
+    near(some.profit, none.profit + some.housingCredit, 1);
+  });
+
+  it('never credits more housing than the occupied months actually cost', () => {
+    const r = computeFlip(base({ liveIn: true, occupancyMonths: 24, avoidedHousing: 999999 }));
+    /* renting somewhere cheaper is a win for your budget, not profit the
+       project earned, so the credit stops at what those months cost */
+    expect(r.housingCredit).toBeLessThan(999999 * 24);
+    /* and it is split across the blocks it offsets, so neither goes negative */
+    expect(r.holdTotal).toBeGreaterThanOrEqual(0);
+    expect(r.finTotal).toBeGreaterThanOrEqual(0);
+  });
+
+  it('the credit covers interest once it has used up the holding costs', () => {
+    const small = computeFlip(base({ liveIn: true, occupancyMonths: 24, avoidedHousing: 400 }));
+    const large = computeFlip(base({ liveIn: true, occupancyMonths: 24, avoidedHousing: 9000 }));
+    /* a small credit lands entirely on holding and leaves financing alone */
+    expect(amt(small.finLines, 'housingCreditInterest')).toBe(0);
+    expect(amt(large.finLines, 'housingCreditInterest')).toBeLessThan(0);
+    expect(large.finTotal).toBeLessThan(small.finTotal);
+  });
+
+  it('costs more overall than a fast flip, because two more years of carry is not free', () => {
+    const fast = computeFlip(base({ liveIn: false }));
+    const slow = computeFlip(base({ liveIn: true, occupancyMonths: 24, avoidedHousing: 0 }));
+    expect(slow.profit).toBeLessThan(fast.profit);
+    expect(slow.annualizedRoi).toBeLessThan(fast.annualizedRoi);
+  });
+
+  it('property tax runs the whole time you own it, occupied or not', () => {
+    const s = base({ liveIn: true, occupancyMonths: 24 });
+    const r = computeFlip(s);
+    near(r.propertyTax, s.price * (s.taxRatePct / 100) * (r.holdMonths / 12), 1);
+  });
+
+  it('still conserves cash — the credit cannot leak into the invariant', () => {
+    for (const avoided of [0, 1500, 4000, 99999]) {
+      const r = computeFlip(base({ liveIn: true, occupancyMonths: 24, avoidedHousing: avoided }));
+      near(r.cashBackAtClose - r.peakCash, r.profit, 1);
+    }
+  });
+});
+
 describe('the profit floor', () => {
   it('the verdict reads profit against the floor', () => {
     const s = base({ minProfit: 100000 });
