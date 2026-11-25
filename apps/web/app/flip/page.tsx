@@ -31,6 +31,7 @@ import { Band, Sec, G, R, V, Money, Num, Count } from '../../components/sheet';
 import { buildFlipReport, buildScopeOfWork } from '../../components/flipReport';
 import { AddressInput } from '../../components/AddressInput';
 import { toast } from '../../components/toast';
+import { Icon } from '../../components/Icon';
 import { useAuth } from '../../components/auth';
 import { dealStore, mergeDeals } from '../../lib/dealsync';
 
@@ -384,7 +385,7 @@ export default function FlipPage() {
             <button className="caret-btn" title="Switch deal"
               onClick={ev => { ev.stopPropagation(); setMenuOpen(o => !o); }}>▾</button>
             <div className={`deal-menu${menuOpen ? ' open' : ''}`}>
-              <div className="dm-item new" onClick={newDeal}>＋ New deal</div>
+              <div className="dm-item new" onClick={newDeal}><Icon name="add" size={18} />New deal</div>
               {!savedDeals.length && <div className="dm-empty">No saved flips yet — hit “Save deal” to keep one here.</div>}
               {[...savedDeals].sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || '')).map(d => {
                 const dr = computeFlip(d, 'base');
@@ -403,7 +404,7 @@ export default function FlipPage() {
             </div>
           </div>
           <div className="deal-actions">
-            <button className="btn" onClick={report} title="Open a print-ready deal report">⬇ PDF</button>
+            <button className="btn" onClick={report} title="Open a print-ready deal report"><Icon name="download" size={18} />PDF</button>
             <button className="btn primary" onClick={saveDeal}>Save deal</button>
             <button className="btn ghost" onClick={reset}>Reset</button>
           </div>
@@ -1057,7 +1058,7 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
             <span className="val">{money0(sow.total)}<span className="psf">{psf(sow.total, sqft)}</span></span></div>
           <div className="grp"><span className="lbl">Tasks</span><span className="val">{sow.checkedCount}</span></div>
           <div className="push">
-            <button className="btn" onClick={printSow} disabled={!sow.checkedCount}>⬇ Print scope</button>
+            <button className="btn" onClick={printSow} disabled={!sow.checkedCount}><Icon name="print" size={18} />Print scope</button>
             <button className="btn primary" onClick={pushSow} disabled={!sow.checkedCount}>
               Use as base rehab</button>
           </div>

@@ -16,6 +16,7 @@ import { Card, NumInput, Switch, UnitToggle, Tile, SliderRow, loadJSON, saveJSON
 import { buildRentalReport } from '../../components/report';
 import { AddressInput } from '../../components/AddressInput';
 import { toast } from '../../components/toast';
+import { Icon } from '../../components/Icon';
 import { useAuth } from '../../components/auth';
 import { dealStore, mergeDeals } from '../../lib/dealsync';
 
@@ -76,10 +77,10 @@ const normUrl = (u: string) => {
 
 type TabId = 'analyzer' | 'salescomps' | 'rentcomps' | 'capex' | 'hood' | 'sow';
 const SOON_TABS: Record<string, { ic: string; title: string; body: string }> = {
-  salescomps: { ic: '🏷️', title: 'Sales Comps — coming soon', body: 'Track recently sold comparables and estimate ARV from $/sqft. Any comps saved with your deals in the previous version are preserved and will reappear when this ships.' },
-  rentcomps: { ic: '🔑', title: 'Rental Comps — coming soon', body: 'Track nearby rentals and estimate market rent. Any comps saved with your deals in the previous version are preserved and will reappear when this ships.' },
-  capex: { ic: '🧰', title: 'CapEx Tracker — coming soon', body: 'Log big-ticket systems (roof, HVAC, water heater…) with install year and condition, and get lifespan flags. Saved CapEx data is preserved and will reappear when this ships.' },
-  hood: { ic: '🗺️', title: 'Neighborhood — coming soon', body: 'Research links plus crime, schools and notes that save with the deal. Saved neighborhood notes are preserved and will reappear when this ships.' },
+  salescomps: { ic: 'sell', title: 'Sales Comps — coming soon', body: 'Track recently sold comparables and estimate ARV from $/sqft. Any comps saved with your deals in the previous version are preserved and will reappear when this ships.' },
+  rentcomps: { ic: 'key', title: 'Rental Comps — coming soon', body: 'Track nearby rentals and estimate market rent. Any comps saved with your deals in the previous version are preserved and will reappear when this ships.' },
+  capex: { ic: 'home_repair_service', title: 'CapEx Tracker — coming soon', body: 'Log big-ticket systems (roof, HVAC, water heater…) with install year and condition, and get lifespan flags. Saved CapEx data is preserved and will reappear when this ships.' },
+  hood: { ic: 'map', title: 'Neighborhood — coming soon', body: 'Research links plus crime, schools and notes that save with the deal. Saved neighborhood notes are preserved and will reappear when this ships.' },
 };
 
 export default function RentalPage() {
@@ -355,7 +356,7 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
             <button className="caret-btn" title="Switch deal"
               onClick={ev => { ev.stopPropagation(); setMenuOpen(o => !o); }}>▾</button>
             <div className={`deal-menu${menuOpen ? ' open' : ''}`}>
-              <div className="dm-item new" onClick={newDeal}>＋ New deal</div>
+              <div className="dm-item new" onClick={newDeal}><Icon name="add" size={18} />New deal</div>
               {!savedDeals.length && <div className="dm-empty">No saved deals yet — hit “Save deal” to keep one here.</div>}
               {[...savedDeals].sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || '')).map(d => {
                 const dr = compute(d);
@@ -374,7 +375,7 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
             </div>
           </div>
           <div className="deal-actions">
-            <button className="btn" onClick={pdf} title="Open a print-ready deal report — choose “Save as PDF” in the print dialog">⬇ PDF</button>
+            <button className="btn" onClick={pdf} title="Open a print-ready deal report — choose “Save as PDF” in the print dialog"><Icon name="download" size={18} />PDF</button>
             <button className="btn primary" onClick={saveDeal}>Save deal</button>
             <button className="btn ghost" onClick={reset}>Reset</button>
           </div>
@@ -433,7 +434,7 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
       {SOON_TABS[tab] && (
         <section className="pane on">
           <div className="soon-pane">
-            <div className="sp-ic">{SOON_TABS[tab].ic}</div>
+            <div className="sp-ic"><Icon name={SOON_TABS[tab].ic} size={24} /></div>
             <h3>{SOON_TABS[tab].title}</h3>
             <p>{SOON_TABS[tab].body}</p>
           </div>
@@ -442,7 +443,7 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
 
       {/* ---------- analyzer ---------- */}
       <section className={`pane${tab === 'analyzer' ? ' on' : ''}`}>
-        <div className="grid">
+        <div className="calc-grid">
           {/* LEFT: INPUTS */}
           <div>
             <Card dense title="Acquisition" tag="Purchase">
@@ -472,7 +473,7 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
             <Card dense title="Financing" tag={allCash ? 'All cash' : 'Stack'}>
               {allCash && (
                 <div className="fin-note">
-                  <span className="ic" aria-hidden="true">💵</span>
+                  <Icon name="payments" size={20} className="ic" />
                   <span><b>All-cash purchase — financing is off</b>
                     <span>You&apos;re covering the full {money0(s.price)} with your own money, so there is no loan to
                       describe. Drag the down payment below 100% to bring the loan, ARM and creative-financing
@@ -786,7 +787,7 @@ ${secHtml || '<p><em>No line items entered.</em></p>'}
       <section className={`pane${tab === 'sow' ? ' on' : ''}`}>
         <div className="sow-toolbar">
           <div className="left">
-            <button className="btn primary" onClick={downloadSow}>⬇ Download for contractor</button>
+            <button className="btn primary" onClick={downloadSow}><Icon name="download" size={18} />Download for contractor</button>
           </div>
           <div className="sow-total-chip"><span className="lbl">Rehab total</span><span className="val">{money0(sowTotal)}</span></div>
         </div>

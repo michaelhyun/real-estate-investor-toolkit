@@ -10,6 +10,7 @@ import {
 } from '@reit/core';
 import { Card, NumInput, Switch, UnitToggle, Tile, loadJSON, saveJSON, openReportWindow, REPORT_CSS, escapeHtml } from '../../components/ui';
 import { toast } from '../../components/toast';
+import { Icon } from '../../components/Icon';
 
 const DRAFT_KEY = 'mortgage.draft.v1';
 const RENTAL_DEALS_KEY = 'rentalDeals.v3';
@@ -117,7 +118,7 @@ export default function MortgagePage() {
     const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(snap.title)}</title><style>${REPORT_CSS}</style></head><body>
       <header><h1>Mortgage Snapshot</h1><div class="meta">Prepared ${date} · Real Estate Investor Toolkit</div></header>
-      <div class="noprint"><button onclick="print()">🖨 Print / Save as PDF</button></div>
+      <div class="noprint"><button onclick="print()">Print / Save as PDF</button></div>
       <h2>Summary</h2>
       <div class="big">${money0(total)}/mo</div>
       <table>${snap.lines.map(l => { const i = l.indexOf(':'); return `<tr><td>${l.slice(0, i)}</td><td class="r">${l.slice(i + 1).trim()}</td></tr>`; }).join('')}</table>
@@ -145,12 +146,12 @@ export default function MortgagePage() {
             <option value="">Load from a saved deal…</option>
             {deals.map((d, i) => <option key={i} value={i}>{d.name} — {money0(d.price)}</option>)}
           </select>
-          <button className="btn" onClick={pdf} title="Open a print-ready snapshot — choose “Save as PDF” in the print dialog">⬇ PDF</button>
-          <button className="btn" onClick={email} title="Send a text snapshot via your email app">✉ Email</button>
+          <button className="btn" onClick={pdf} title="Open a print-ready snapshot — choose “Save as PDF” in the print dialog"><Icon name="download" size={18} />PDF</button>
+          <button className="btn" onClick={email} title="Send a text snapshot via your email app"><Icon name="mail" size={18} />Email</button>
         </div>
       </div>
 
-      <div className="grid">
+      <div className="calc-grid">
         {/* LEFT: INPUTS */}
         <div>
           <Card title="Loan" tag="Purchase & terms">

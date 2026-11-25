@@ -1,8 +1,10 @@
-/* Tailwind is installed for the upcoming design-kit pass; the current styles
-   are the ported design system in globals.css. Enable the plugin when the
-   Tailwind layer starts being used. */
+/* Tailwind v4 runs through its PostCSS plugin. shadcn/ui components are built
+   on Tailwind utilities, so it is on; the legacy design system in globals.css
+   is plain CSS and sits alongside it. */
 const config = {
-  plugins: {},
+  plugins: {
+    '@tailwindcss/postcss': {},
+  },
 };
 
 export default config;

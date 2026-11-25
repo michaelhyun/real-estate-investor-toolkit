@@ -10,10 +10,12 @@ import {
 } from '@reit/core';
 import { Card, NumInput, UnitToggle, Tile, loadJSON, saveJSON } from '../../components/ui';
 import { toast } from '../../components/toast';
+import { Icon } from '../../components/Icon';
 
 const PKEY = 'portfolio.v1';
 const RENTAL_DEALS_KEY = 'rentalDeals.v3';
-const MEDALS = ['🥇', '🥈', '🥉'];
+/* Podium places are shown as a numbered badge, not a medal emoji. */
+const PODIUM = 3;
 const pctf = (n: number, d = 1) => (isFinite(n) ? n.toFixed(d) : '—') + '%';
 
 const EMPTY: PropertyState = {
@@ -168,7 +170,7 @@ export default function PortfolioPage() {
           ? <div className="empty-note">Add properties below to see how they rank.</div>
           : ranked.map((x, i) => (
             <div className="lb-row" key={i}>
-              <span className="lb-name">{MEDALS[i] ? MEDALS[i] + ' ' : ''}{x.p.name || 'Property ' + (i + 1)}</span>
+              <span className="lb-name">{i < PODIUM && <span className="lb-place">{i + 1}</span>}{x.p.name || 'Property ' + (i + 1)}</span>
               <span className="lb-track"><span
                 className={`lb-bar ${x.m.roe < 6 ? 'low' : x.m.roe < 10 ? 'mid' : ''}`}
                 style={{ width: `${Math.max(2, x.m.roe / maxRoe * 100)}%` }} /></span>
@@ -176,7 +178,7 @@ export default function PortfolioPage() {
             </div>
           ))}
         <div className={`lazy-note${lazy.length ? ' show' : ''}`}>
-          {lazy.length > 0 && <>💤 Lazy equity: <b>{lazy.map(x => x.p.name || 'unnamed').join(', ')}</b> {lazy.length === 1 ? 'is' : 'are'} returning under 6% on {money0(lazy.reduce((a, x) => a + x.m.equityShare, 0))} of your equity — worth modeling a cash-out refi, HELOC, or 1031 into a stronger deal.</>}
+          {lazy.length > 0 && <><Icon name="hourglass_bottom" size={18} /><span>Lazy equity: <b>{lazy.map(x => x.p.name || 'unnamed').join(', ')}</b> {lazy.length === 1 ? 'is' : 'are'} returning under 6% on {money0(lazy.reduce((a, x) => a + x.m.equityShare, 0))} of your equity — worth modeling a cash-out refi, HELOC, or 1031 into a stronger deal.</span></>}
         </div>
       </Card>
 
@@ -195,7 +197,7 @@ export default function PortfolioPage() {
               if (isFinite(x.appr)) subBits.push(`▲ ${x.appr.toFixed(0)}% since purchase`);
               return (
                 <div className="pt-row" key={i} onClick={() => openModal(props.indexOf(p))}>
-                  <span className="rank">{MEDALS[i] || ''}</span>
+                  <span className="rank">{i < PODIUM ? <span className="lb-place">{i + 1}</span> : ''}</span>
                   <span className="pname">{p.name || 'Unnamed property'}
                     {subBits.length > 0 && <span className="sub">{subBits.join(' · ')}</span>}</span>
                   <span className="c">{money0(p.value || 0)}</span>
@@ -204,7 +206,7 @@ export default function PortfolioPage() {
                   <span className={`c ${x.cfShare >= 0 ? 'pos' : 'neg'}`}>{money(x.cfShare)}</span>
                   <span className="c">{isFinite(x.coc) ? pctf(x.coc) : '—'}</span>
                   <span className={`c ${isFinite(x.roe) ? (x.roe >= 10 ? 'roe-hi' : x.roe < 6 ? 'roe-lo' : '') : ''}`}>{isFinite(x.roe) ? pctf(x.roe) : '—'}</span>
-                  <button className="edit" title="Edit">✎</button>
+                  <button className="edit" title="Edit" aria-label="Edit"><Icon name="edit" size={16} /></button>
                   <button className="del" title="Remove" onClick={ev => { ev.stopPropagation(); removeProp(p); }}>✕</button>
                 </div>
               );

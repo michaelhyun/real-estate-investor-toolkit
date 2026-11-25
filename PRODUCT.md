@@ -1,0 +1,33 @@
+# Product
+
+<!-- impeccable:product-schema 1 -->
+
+## Platform
+
+web
+
+## Users
+Michael first (confirmed 2026-11-25): a Bay Area real estate agent and investor underwriting his own deals at a desk, and checking them on a phone. It is public, so other investors can use it, but it is built around how he works.
+
+## Product Purpose
+A set of calculators for real estate investing: rental analysis, mortgage, fix-and-flip, income tax, a renovation cost guide and a portfolio return-on-equity dashboard. Success is reaching a decision on a deal (offer, renegotiate or walk) quickly, with numbers that can be trusted.
+
+## Operating Context
+- Every page is client-side. State lives in localStorage and, when signed in, syncs to Supabase. The site is a static export on GitHub Pages; a push to `main` deploys it.
+- The calculation engine is `packages/core` (TypeScript, tested). The web app is `apps/web` (Next 15, React 19, Tailwind v4, shadcn/ui).
+- Deals are printed or saved as PDF reports.
+
+## Capabilities and Constraints
+- Bay Area defaults: city transfer-tax presets, local renovation prices, California income tax.
+- Results are estimates for screening, not offers. The site says so.
+- Dense inputs are expected: the flip analyzer is laid out as a spreadsheet and must stay that dense.
+
+## Brand Commitments
+- Carries the **BlueDoor Realty** brand (Michael, 2026-11-25) and should feel like it belongs with the BlueDoor Hub. The Hub's design system is the reference: `~/Projects/BlueDoorCRM/DESIGN.md`.
+- Logo: the BlueDoor mark and wordmark, used under the Hub's logo rules.
+
+## Product Principles
+- Numbers first. The answer (the verdict and the few figures that decide it) outranks the inputs that produce it.
+- Trust comes from precision: aligned figures, stated assumptions, no decoration around money.
+- One system. The same components and tokens as the Hub, so the two read as one product family.
+- Dense where the work is dense, calm everywhere else.

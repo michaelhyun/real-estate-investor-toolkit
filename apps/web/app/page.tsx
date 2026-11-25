@@ -1,54 +1,50 @@
 import Link from 'next/link';
+import { Icon } from '../components/Icon';
+import { TOOLS, GROUPS } from '../lib/tools';
 
-const CARDS = [
-  {
-    href: '/rental', ic: '🏘️', title: 'Rental Property Analyzer',
-    desc: 'Cash flow, cash-on-cash return, DSCR, creative financing, a 5-year pro-forma, and a contractor-ready scope of work.',
-  },
-  {
-    href: '/mortgage', ic: '🏦', title: 'Mortgage Calculator',
-    desc: 'Full monthly payment breakdown with taxes, insurance and PMI, an amortization schedule, and extra-payment payoff savings.',
-  },
-  {
-    href: '/flip', ic: '🔨', title: 'Flip Analyzer',
-    desc: 'Bay Area fix-and-flip underwriting — a rehab × ARV scenario grid, a profit sensitivity heatmap, city transfer tax presets, and a trade-by-trade cost checklist that builds your scope of work.',
-  },
-  {
-    href: '/renovations', ic: '📖', title: 'Renovation Guide',
-    desc: 'What 50 common renovations actually cost in the Bay Area — unit prices, whole-job ranges, permit requirements, and what catches people out on each one.',
-  },
-  {
-    href: '/portfolio', ic: '📊', title: 'Portfolio ROE Dashboard',
-    desc: 'Every rental you own in one view — cash-on-cash, return on equity, a performance leaderboard, and lazy-equity alerts.',
-  },
-];
+/* What each tool answers, in the words of the decision it supports. */
+const ANSWERS: Record<string, string> = {
+  rental: 'Cash flow, cash-on-cash return, DSCR, creative financing, a 5-year pro-forma, and a contractor-ready scope of work.',
+  mortgage: 'Full monthly payment with taxes, insurance and PMI, an amortization schedule, and what extra payments save.',
+  flip: 'Bay Area fix-and-flip underwriting: a rehab and ARV scenario grid, profit sensitivity, city transfer tax presets, and a trade-by-trade scope of work.',
+  tax: 'Federal and California income tax, marginal against effective rates, and capital gains.',
+  renovations: 'What 50 common renovations cost in the Bay Area: unit prices, whole-job ranges, permit requirements, and what catches people out.',
+  portfolio: 'Every rental you own in one view: cash-on-cash, return on equity, a performance leaderboard, and lazy-equity alerts.',
+};
 
 export default function Home() {
   return (
-    <>
-      <div className="hero">
-        <h1>Analyze deals like a pro, <em>in minutes</em></h1>
-        <p>A growing toolkit for real-estate investors — underwrite rentals, size up financing, and keep every deal you&apos;ve looked at in one place.</p>
-      </div>
+    <div className="max-w-3xl">
+      <h1 className="text-[2rem] font-extrabold leading-tight tracking-[-0.015em] text-ink-strong max-[640px]:text-[1.75rem]">Investor Toolkit</h1>
+      <p className="mt-1 text-[0.9375rem] text-muted-foreground">Underwrite a rental, size up the financing, and keep every deal you have looked at in one place.</p>
 
-      <div className="tool-grid">
-        {CARDS.map(c => (
-          <Link key={c.href} className="tool-card" href={c.href}>
-            <div className="ic">{c.ic}</div>
-            <h3>{c.title}</h3>
-            <p>{c.desc}</p>
-            <span className="go">Open tool →</span>
-          </Link>
-        ))}
-        <div className="tool-card soon">
-          <span className="badge">Coming soon</span>
-          <div className="ic">🛠️</div>
-          <h3>More tools</h3>
-          <p>Sales &amp; rental comps, CapEx tracker, neighborhood research, BRRRR analyzer and more — the toolkit keeps growing.</p>
-        </div>
-      </div>
+      {GROUPS.map(g => (
+        <section key={g} className="mt-7">
+          <h2 className="text-lg font-extrabold text-ink-strong">{g}</h2>
+          <ul className="mt-3 divide-y divide-line overflow-hidden rounded-lg bg-card shadow-tight">
+            {TOOLS.filter(t => t.group === g).map(t => (
+              <li key={t.id}>
+                <Link href={t.href}
+                  className="group flex items-center gap-4 px-5 py-4 no-underline transition-colors hover:bg-primary-tint hover:no-underline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary-soft text-primary-deep">
+                    <Icon name={t.icon} size={22} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-base font-bold text-ink-strong">{t.name}</span>
+                    <span className="mt-0.5 block text-[0.9375rem] leading-snug text-muted-foreground">{ANSWERS[t.id]}</span>
+                  </span>
+                  <Icon name="chevron_right" size={22} className="text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
 
-      <p className="footnote">Tools are estimates for screening purposes only — always verify numbers locally before making offers.</p>
-    </>
+      <p className="mt-7 text-[0.9375rem] text-muted-foreground">
+        <span className="font-semibold text-foreground">Coming next:</span> sales and rental comps, a CapEx tracker, neighborhood research and a BRRRR analyzer.
+      </p>
+      <p className="mt-2 text-[0.8125rem] text-muted-foreground">These tools give estimates for screening. Verify the numbers locally before making an offer.</p>
+    </div>
   );
 }
