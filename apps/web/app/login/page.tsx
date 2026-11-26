@@ -91,7 +91,7 @@ export default function LoginPage() {
     if (busy || !supabase) return;
     setBusy(true);
     setNotice(null);
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: here('/rental/') } });
+    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: here('/deal/') } });
     /* on success the browser is already on its way to Google; only a failure comes back here */
     if (error) { setNotice({ kind: 'err', text: explain(error) }); setBusy(false); }
   }
@@ -121,13 +121,13 @@ export default function LoginPage() {
           throw error;
         }
         toast('Signed in');
-        router.push('/rental');
+        router.push('/deal');
       } else if (mode === 'signup') {
         const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: here('/login/') } });
         if (error) throw error;
         /* Supabase answers an existing address with a user that has no identities, to avoid leaking who has an account */
         if (data.user && data.user.identities && data.user.identities.length === 0) throw new Error('already registered');
-        if (data.session) { toast('Account created'); router.push('/rental'); }
+        if (data.session) { toast('Account created'); router.push('/deal'); }
         else setMode('verify');
       } else if (mode === 'forgot') {
         const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: here('/login/') });
@@ -137,7 +137,7 @@ export default function LoginPage() {
         const { error } = await supabase.auth.updateUser({ password });
         if (error) throw error;
         toast('Password updated');
-        router.push('/rental');
+        router.push('/deal');
       }
     } catch (e: any) {
       setNotice({ kind: 'err', text: explain(e) });

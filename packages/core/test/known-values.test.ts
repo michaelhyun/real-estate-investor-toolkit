@@ -142,3 +142,20 @@ describe('portfolio anchors', () => {
     expect(m.roe).toBeCloseTo(2000 * 12 / 200000 * 100, 6);
   });
 });
+
+describe('rent by the room', () => {
+  it('underwrites on the sum of the room rents and ignores the single rent figure', () => {
+    const whole = defaultDealState(); whole.rent = 4200;
+    const rooms = defaultDealState(); rooms.rent = 2000; rooms.byRoom = true; rooms.roomRents = [1100, 1050, 1050, 1000];
+    const a = compute(whole), b = compute(rooms);
+    expect(b.rent).toBe(4200);
+    expect(b.cashFlow).toBeCloseTo(a.cashFlow, 6);
+    expect(b.years[4].yRent).toBeCloseTo(a.years[4].yRent, 6);
+  });
+  it('falls back to the single rent when the option is off, and to zero with no rooms', () => {
+    const s = defaultDealState(); s.roomRents = [900, 900];
+    expect(compute(s).rent).toBe(2000);
+    s.byRoom = true; s.roomRents = [];
+    expect(compute(s).rent).toBe(0);
+  });
+});

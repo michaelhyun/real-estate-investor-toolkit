@@ -2,12 +2,10 @@
    server-rendered home page and the client shell can both read it. */
 
 export const TOOLS = [
-  { id: 'rental', icon: 'home_work', name: 'Rental Property Analyzer', short: 'Rental', href: '/rental', group: 'Calculators',
-    desc: 'Cash flow, cash-on-cash, DSCR & 5-year pro-forma' },
+  { id: 'deal', icon: 'home_work', name: 'Deal Analyzer', short: 'Deal Analyzer', href: '/deal', group: 'Calculators',
+    desc: 'Rental or flip: cash flow, returns, scenarios & sensitivity' },
   { id: 'mortgage', icon: 'account_balance', name: 'Mortgage Calculator', short: 'Mortgage', href: '/mortgage', group: 'Calculators',
     desc: 'Payment breakdown, amortization & extra-payment savings' },
-  { id: 'flip', icon: 'construction', name: 'Flip Analyzer', short: 'Flip', href: '/flip', group: 'Calculators',
-    desc: 'Scenarios, sensitivity & a room-by-room scope of work' },
   { id: 'tax', icon: 'receipt_long', name: 'Income Tax Calculator', short: 'Income Tax', href: '/tax', group: 'Calculators',
     desc: 'Federal & California, marginal vs effective, capital gains' },
   { id: 'portfolio', icon: 'donut_small', name: 'Portfolio ROE Dashboard', short: 'Portfolio', href: '/portfolio', group: 'Portfolio',

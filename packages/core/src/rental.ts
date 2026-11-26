@@ -79,6 +79,10 @@ export interface DealState {
   subtoRate: number;
   subtoTerm: number;
   rent: number;
+  /* Rent by the room (co-living, student housing): when on, the gross rent
+     is the sum of the per-room rents and `rent` is kept but not used. */
+  byRoom?: boolean;
+  roomRents?: number[];
   vacancy: number;
   rentGrowth: number;
   expGrowth: number;
@@ -164,14 +168,22 @@ export interface DealResult {
   downAmt: number; sellerAmt: number; subtoBal: number; newLoan: number; overBy: number;
   piBank: number; piSeller: number; piSub: number; pi: number;
   payAfterArm: number; payAfterIO: number;
-  closingAmt: number; cashInvested: number; otherIncTotal: number; utilTotal: number;
+  closingAmt: number; cashInvested: number; rent: number; otherIncTotal: number; utilTotal: number;
   gross: number; vacLoss: number; effIncome: number; expLines: ExpLine[]; opEx: number;
   noi: number; cashFlow: number; annualCF: number; coc: number; dscr: number;
   onePct: number; grm: number; years: ProFormaYear[];
   netSale: number; proceeds: number; totalProfit: number; roi5: number; annualized: number;
 }
 
+/** The gross monthly rent a deal is underwritten on: the per-room rents
+    added up when it is rented by the room, the single rent figure otherwise. */
+export function grossRent(s: Pick<DealState, 'rent' | 'byRoom' | 'roomRents'>): number {
+  if (!s.byRoom) return s.rent || 0;
+  return (s.roomRents || []).reduce((t, v) => t + (isFinite(+v) ? Math.max(0, +v) : 0), 0);
+}
+
 export function compute(s: DealState): DealResult {
+  const rent = grossRent(s);
   const downAmt = s.price * s.downPct / 100;
   const sellerAmt = s.sellerOn ? s.sellerAmt : 0;
   const subtoBal = s.subtoOn ? s.subtoBal : 0;
@@ -221,13 +233,13 @@ export function compute(s: DealState): DealResult {
     return t + (s.utilUnits?.[k] === 'yr' ? v / 12 : v);
   }, 0);
 
-  const gross = s.rent + otherIncTotal;
-  const vacLoss = s.rent * s.vacancy / 100;
+  const gross = rent + otherIncTotal;
+  const vacLoss = rent * s.vacancy / 100;
   const effIncome = gross - vacLoss;
 
   const expLines: ExpLine[] = EXPENSES.map(e => ({
     ...e, unit: (s.units[e.id] || e.unit) as ExpenseDef['unit'], raw: s.expenses[e.id] || 0,
-    monthly: expMonthly(s.units[e.id] || e.unit, s.expenses[e.id] || 0, s.rent),
+    monthly: expMonthly(s.units[e.id] || e.unit, s.expenses[e.id] || 0, rent),
   }));
   const opEx = expLines.reduce((t, e) => t + e.monthly, 0) + utilTotal;
   const noi = effIncome - opEx;
@@ -237,8 +249,8 @@ export function compute(s: DealState): DealResult {
   const dscr = pi > 0 ? (noi / pi) : NaN;
 
   const basis = s.price + s.rehab;
-  const onePct = basis > 0 ? s.rent / basis * 100 : 0;
-  const grm = s.rent > 0 ? s.price / (s.rent * 12) : NaN;
+  const onePct = basis > 0 ? rent / basis * 100 : 0;
+  const grm = rent > 0 ? s.price / (rent * 12) : NaN;
 
   /* balances across all three notes at m months (m is always a year boundary) */
   const balancesAt = (m: number): number => {
@@ -254,7 +266,7 @@ export function compute(s: DealState): DealResult {
   for (let y = 1; y <= 5; y++) {
     const g = Math.pow(1 + s.rentGrowth / 100, y - 1);
     const eg = Math.pow(1 + s.expGrowth / 100, y - 1);
-    const yRent = s.rent * 12 * g, yOther = otherIncTotal * 12 * g;
+    const yRent = rent * 12 * g, yOther = otherIncTotal * 12 * g;
     const yVac = yRent * s.vacancy / 100;
     const yEff = yRent + yOther - yVac;
     const yOpEx = expLines.reduce((t, e) => {
@@ -281,7 +293,7 @@ export function compute(s: DealState): DealResult {
   return {
     downAmt, sellerAmt, subtoBal, newLoan, overBy, piBank, piSeller, piSub, pi,
     payAfterArm: bank.payAfterArm, payAfterIO: bank.payAfterIO,
-    closingAmt, cashInvested, otherIncTotal, utilTotal, gross, vacLoss, effIncome, expLines, opEx,
+    closingAmt, cashInvested, rent, otherIncTotal, utilTotal, gross, vacLoss, effIncome, expLines, opEx,
     noi, cashFlow, annualCF, coc, dscr, onePct, grm, years, netSale, proceeds, totalProfit, roi5, annualized,
   };
 }

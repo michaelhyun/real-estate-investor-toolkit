@@ -224,7 +224,7 @@ export function buildRentalReport({ s, r, verdict }: ReportInput): string {
     .map(k => `${UTIL_LABELS[k]} ${money0(s.utilUnits?.[k] === 'yr' ? s.utils[k] / 12 : s.utils[k])}`).join(' · ');
 
   const opsRows = rows([
-    ['Gross monthly rent', `${money0(s.rent)}/mo entered`, money0(s.rent)],
+    ['Gross monthly rent', s.byRoom ? `${(s.roomRents || []).length} rooms rented by the room` : `${money0(r.rent)}/mo entered`, money0(r.rent)],
     r.otherIncTotal > 0 ? ['Other income', otherIncNote, money0(r.otherIncTotal)] : null,
     ['Vacancy loss', `${stripZeros(pct(s.vacancy, 1))} of rent`, neg(r.vacLoss), 'neg'],
     ['Effective gross income', '', money0(r.effIncome), 'sub'],

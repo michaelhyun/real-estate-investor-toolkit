@@ -46,6 +46,7 @@ One family, Source Sans 3. Page titles 28px/800 with -0.015em tracking; section 
 ## Migration status
 - On shadcn components: shell, home, Rental Analyzer, and the address search box (shared with Flip).
 - Mortgage Calculator: on shadcn components (`components/calc.tsx`).
+- Deal Analyzer (`/deal`): the Rental and Flip calculators on one page behind a Rental / Flip switch; `/rental` and `/flip` redirect to it.
 - Flip Analyzer: on shadcn components, one two-column page. The Scope of Work tab is off the page; its saved data still round-trips.
 - Income Tax Calculator: on shadcn components, one two-column page. Federal, California and rates are panels on the page. Professional status, pricing a sale, brackets, and thresholds open as dialogs from a row of buttons under the headline figures; reference tables and what-ifs go in dialogs, not at the bottom of the page.
 - **Row notes:** guidance for a row lives behind an info icon (`InfoTip` in `components/calc.tsx`, via the `info` prop on `Field` and `Line`), opened on hover, focus or tap. Panels can fold (`open`/`onOpenChange` on `Panel`) and keep their headline figure in the tag. Keep a note to one or two short sentences; pass `more` (a URL) to add a Learn more link to an official source.
