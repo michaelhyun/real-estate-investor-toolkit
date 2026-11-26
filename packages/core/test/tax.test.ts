@@ -147,6 +147,16 @@ describe('rental losses and real estate professional status', () => {
     expect(c.suspendedIfOff).toBe(80000);
   });
 
+  it('changes nothing in California, which treats every rental as passive', () => {
+    const c = repsComparison(plain({ wages: 500000, rentalNet: -80000 }));
+    near(c.on.caTotal, c.off.caTotal, 0.01);
+    near(c.on.caTaxableIncome, c.off.caTaxableIncome, 0.01);
+    near(c.on.caRentalAllowed, 0);
+    near(c.on.caRentalSuspended, 80000);
+    /* the federal side still moves */
+    expect(c.on.federalTotal).toBeLessThan(c.off.federalTotal);
+  });
+
   it('on a profitable rental it is worth exactly the investment surtax', () => {
     /* nothing to free up, but a materially participating professional's
        rental income leaves net investment income, so the 3.8% comes off */

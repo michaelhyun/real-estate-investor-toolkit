@@ -164,6 +164,9 @@ export interface TaxResult {
 
   /* california */
   caAgi: number;
+  /** rental loss California lets through; it ignores professional status */
+  caRentalAllowed: number;
+  caRentalSuspended: number;
   caStandard: number;
   caItemized: number;
   caItemizedPhaseout: number;
@@ -265,7 +268,19 @@ export function computeTax(s: TaxState, probe = false): TaxResult {
   /* ---------- california ----------
      Runs first because the tax it produces is the state income tax the
      federal SALT deduction claims. */
-  const caAgi = agi + s.hsa;   /* California never conformed to HSAs */
+  /* California never adopted §469(c)(7): for the state every rental is
+     passive, so professional status frees nothing there. The $25,000
+     allowance does apply, measured on California's own income (no HSA
+     deduction). The state return therefore re-runs the rental loss as if
+     the election were off. */
+  const caCap = st === 'mfs' ? 12500 : 25000;
+  const caSpecialAllowance = pos(Math.min(caCap, caCap - pos(magi469 + s.hsa - (st === 'mfs' ? 50000 : 100000)) * 0.5));
+  const caRentalAllowedNow = Math.min(currentLoss, caSpecialAllowance);
+  const caRentalSuspended = (currentLoss - caRentalAllowedNow) + carryLeft;
+  /* the business loss cap, with the rental left out of the business */
+  const caEblDisallowed = s.seNetProfit < -eblCap ? -s.seNetProfit - eblCap : 0;
+  const caAgi = agi + s.hsa   /* California never conformed to HSAs */
+    + (currentAllowed - caRentalAllowedNow) - (eblDisallowed - caEblDisallowed);
   const caMedical = pos(s.medical - 0.075 * caAgi);
   /* No deduction for state income tax on a state return, and property tax
      is not capped the way the federal cap caps it. */
@@ -393,6 +408,8 @@ export function computeTax(s: TaxState, probe = false): TaxResult {
     addlMedicare,
     federalTotal,
     caAgi,
+    caRentalAllowed: caRentalAllowedNow + carryUsed,
+    caRentalSuspended,
     caStandard,
     caItemized,
     caItemizedPhaseout,

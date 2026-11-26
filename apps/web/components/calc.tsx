@@ -16,24 +16,64 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { NativeSelect } from '@/components/ui/native-select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Icon } from '@/components/Icon';
 
-/* ---------- Panel: a titled card ---------- */
+/* ---------- InfoTip: a small "i" that holds a row's note ----------
+   The note opens on hover, on keyboard focus and on tap, so it works on a
+   phone too. Notes live here instead of on the page to keep rows short. */
+export function InfoTip({ children, label = 'More about this', more }: {
+  children: React.ReactNode; label?: string;
+  /** A page to read more on, shown as a link under the note. */
+  more?: string;
+}) {
+  const host = more ? more.replace(/^https?:\/\/(www\.)?/, '').split('/')[0] : '';
+  return (
+    <Popover>
+      <PopoverTrigger openOnHover delay={120} closeDelay={80}
+        render={<button type="button" aria-label={label}
+          className="ml-1 inline-flex size-4 translate-y-[3px] items-center justify-center rounded-full text-muted-foreground/70 outline-none hover:text-primary focus-visible:text-primary focus-visible:ring-2 focus-visible:ring-ring/50 data-popup-open:text-primary" />}>
+        <Icon name="info" size={15} />
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" className="block w-64 p-3 text-[0.8125rem] font-normal normal-case leading-snug tracking-normal text-[#3a4352] [&_b]:font-bold [&_b]:text-ink-strong">
+        {children}
+        {more ? (
+          <a href={more} target="_blank" rel="noopener noreferrer"
+            className="mt-1.5 flex w-fit items-center gap-0.5 font-semibold text-primary hover:text-primary-hover hover:underline">
+            Learn more on {host}<Icon name="open_in_new" size={13} />
+          </a>
+        ) : null}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/* ---------- Panel: a titled card ----------
+   Given onOpenChange, the title bar folds the panel. The tag stays visible
+   when shut, so it should hold the panel's headline figure. */
 export function Panel({
-  title, tag, children, dense = false, className,
+  title, tag, children, dense = false, className, open = true, onOpenChange,
 }: {
   title?: React.ReactNode; tag?: React.ReactNode; children: React.ReactNode;
-  dense?: boolean; className?: string;
+  dense?: boolean; className?: string; open?: boolean; onOpenChange?: (o: boolean) => void;
 }) {
+  const id = useId();
+  const head = 'flex min-h-11 w-full items-center justify-between gap-3 px-4 text-left';
+  const inner = (
+    <>
+      <h2 className="flex min-w-0 items-center gap-1 truncate text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">
+        {onOpenChange && <Icon name="chevron_right" size={18} className={cn('-ml-1.5 transition-transform', open && 'rotate-90')} />}{title}
+      </h2>
+      {tag != null && <span className="shrink-0 whitespace-nowrap text-xs font-semibold tabular-nums text-muted-foreground">{tag}</span>}
+    </>
+  );
   return (
     <Card className={cn('gap-0 py-0', className)}>
-      {title != null && (
-        <div className="flex min-h-11 items-center justify-between gap-3 border-b border-line/70 px-4">
-          <h2 className="min-w-0 truncate text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">{title}</h2>
-          {tag != null && <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-muted-foreground">{tag}</span>}
-        </div>
-      )}
-      <CardContent className={cn('px-4', dense ? 'py-2' : 'py-3')}>{children}</CardContent>
+      {title != null && (onOpenChange
+        ? <button type="button" aria-expanded={open} aria-controls={id} onClick={() => onOpenChange(!open)}
+            className={cn(head, 'rounded-t-lg hover:bg-muted/50', open ? 'border-b border-line/70' : 'rounded-b-lg')}>{inner}</button>
+        : <div className={cn(head, 'border-b border-line/70')}>{inner}</div>)}
+      <CardContent id={id} hidden={!open} className={cn('px-4', dense ? 'py-2' : 'py-3')}>{children}</CardContent>
     </Card>
   );
 }
@@ -45,13 +85,21 @@ const FieldLabel = createContext<string | undefined>(undefined);
 export const useFieldLabel = () => useContext(FieldLabel);
 
 export function Field({
-  label, hint, children, className,
-}: { label: React.ReactNode; hint?: React.ReactNode; children?: React.ReactNode; className?: string }) {
+  label, hint, info, more, children, className,
+}: {
+  label: React.ReactNode; hint?: React.ReactNode;
+  /** A link for the info note's "Learn more". */
+  more?: string;
+  /** A note for the row, shown from a small info icon beside the label. */
+  info?: React.ReactNode;
+  children?: React.ReactNode; className?: string;
+}) {
   const id = useId();
   return (
     <div className={cn('flex min-h-9 flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-b border-line/60 py-[3px] last:border-b-0', className)}>
-      <div id={id} className="min-w-[110px] flex-1 text-sm leading-snug text-[#3a4352]">
-        {label}
+      <div className="min-w-[110px] flex-1 text-sm leading-snug text-[#3a4352]">
+        <span id={id}>{label}</span>
+        {info ? <InfoTip more={more}>{info}</InfoTip> : null}
         {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
       </div>
       <FieldLabel.Provider value={id}>{children}</FieldLabel.Provider>
@@ -61,9 +109,9 @@ export function Field({
 
 /* ---------- Line: a computed row — label left, figure right ---------- */
 export function Line({
-  label, value, tone, strong = false, total = false, indent = false, className,
+  label, value, tone, strong = false, total = false, indent = false, className, hint, info, more,
 }: {
-  label: React.ReactNode; value: React.ReactNode;
+  label: React.ReactNode; value: React.ReactNode; hint?: React.ReactNode; info?: React.ReactNode; more?: string;
   tone?: 'pos' | 'neg' | 'warn'; strong?: boolean; total?: boolean; indent?: boolean; className?: string;
 }) {
   const color = tone === 'pos' ? 'text-success' : tone === 'neg' ? 'text-destructive' : tone === 'warn' ? 'text-warning' : 'text-ink-strong';
@@ -71,7 +119,10 @@ export function Line({
     <div className={cn(
       'flex min-h-8 items-center justify-between gap-3 border-b border-line/60 py-[3px] text-sm last:border-b-0',
       total && 'border-t border-b-0 border-line-strong font-bold', className)}>
-      <span className={cn('leading-snug', indent && 'pl-3', strong || total ? 'font-bold text-ink-strong' : tone === 'warn' ? 'text-warning' : 'text-[#3a4352]')}>{label}</span>
+      <span className={cn('leading-snug', indent && 'pl-3', strong || total ? 'font-bold text-ink-strong' : tone === 'warn' ? 'text-warning' : 'text-[#3a4352]')}>
+        {label}{info ? <InfoTip more={more}>{info}</InfoTip> : null}
+        {hint ? <span className="block text-xs font-normal text-muted-foreground">{hint}</span> : null}
+      </span>
       <span className={cn('whitespace-nowrap font-semibold tabular-nums', (strong || total) && 'font-bold', color)}>{value}</span>
     </div>
   );
@@ -232,11 +283,11 @@ export function SliderField({
 
 /* ---------- Stat: one headline figure ---------- */
 export function Stat({
-  label, value, note, tone,
-}: { label: string; value: string; note?: string; tone?: 'pos' | 'neg' }) {
+  label, value, note, tone, info, more,
+}: { label: string; value: string; note?: React.ReactNode; tone?: 'pos' | 'neg'; info?: React.ReactNode; more?: string }) {
   return (
     <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-card p-4 shadow-tight">
-      <div className="text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">{label}</div>
+      <div className="text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">{label}{info ? <InfoTip more={more}>{info}</InfoTip> : null}</div>
       <div className={cn('text-[1.75rem] font-extrabold leading-tight tracking-[-0.015em] tabular-nums',
         tone === 'pos' ? 'text-success' : tone === 'neg' ? 'text-destructive' : 'text-ink-strong')}>{value}</div>
       {note ? <div className="text-[0.8125rem] leading-snug text-muted-foreground">{note}</div> : null}

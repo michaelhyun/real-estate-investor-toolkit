@@ -1,10 +1,9 @@
 'use client';
 
-/* Income Tax Calculator — federal and California, laid out as a sheet.
+/* Income Tax Calculator, federal and California. Built from components/calc.
 
-   Four tabs over one TaxState. Tab 1 is the only one you type into; the rest
-   are derivations of it. The tool exists to answer three questions a bracket
-   table cannot:
+   One page: what you type on the left, what it costs on the right. The tool
+   exists to answer three questions a bracket table cannot:
 
    · what a rental loss is actually worth to you this year, which depends
      entirely on whether you qualify as a real estate professional;
@@ -12,25 +11,83 @@
      stacked on everything else you earn;
    · what your NEXT dollar pays, which is not the bracket you are in.
 
+   Every row's explanation sits behind its info icon, so the columns stay short.
+
    Everything stays on this device. Tax inputs are the most sensitive numbers
    in the toolkit, so unlike saved deals they are never synced to an account. */
 
 import { useEffect, useMemo, useState } from 'react';
 import {
   defaultTaxState, computeTax, gainsImpact, repsComparison, tablesFor,
-  bracketRate, FILING_STATUSES, TAX_YEARS,
+  FILING_STATUSES, TAX_YEARS,
   money, money0, pct,
-  type TaxState, type FilingStatus, type TaxYear, type Bracket, type TaxResult,
+  type TaxState, type FilingStatus, type TaxYear, type Bracket,
 } from '@reit/core';
-import { NumInput, Switch, UnitToggle, loadJSON, saveJSON } from '../../components/ui';
-import { Band, Sec, G, R, V, Money, Num, Count } from '../../components/sheet';
+import { loadJSON, saveJSON } from '../../components/ui';
+import { Panel, Field, Line, SectionLabel, NumberField, Segmented, Stepper, Stat, Note, Toggle, InfoTip } from '../../components/calc';
+import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Icon } from '../../components/Icon';
+import { PaymentPie } from '../../components/PaymentPie';
+import { cn } from '@/lib/utils';
 
 const DRAFT_KEY = 'taxCalc.draft.v1';
 
-type TabId = 'income' | 'summary' | 'gains' | 'brackets';
+/* Ring colours, checked for colour-blind separation between every pair. */
+const TAX_PIE = { fed: '#3c5bf6', ca: '#b8651a', keep: '#1f9d6b' };
+type SliceKey = keyof typeof TAX_PIE;
 
-/* the foldable sections of the input sheet, in the order they appear */
-const INPUT_SECS = ['filing', 'earned', 'portfolio', 'realestate', 'adjust', 'itemized', 'qbi'];
+/* Where each tip's "Learn more" goes: the IRS, FTB or EDD page on that topic. */
+const IRS = 'https://www.irs.gov', FTB = 'https://www.ftb.ca.gov/file/personal';
+const U = {
+  filing: `${IRS}/publications/p501`,
+  ctc: `${IRS}/credits-deductions/individuals/child-tax-credit`,
+  payroll: `${IRS}/taxtopics/tc751`,
+  schedC: `${IRS}/forms-pubs/about-schedule-c-form-1040`,
+  seTax: `${IRS}/taxtopics/tc554`,
+  rental: `${IRS}/taxtopics/tc414`,
+  passive: `${IRS}/taxtopics/tc425`,
+  reps: `${IRS}/publications/p925`,
+  f8582: `${IRS}/forms-pubs/about-form-8582`,
+  qbi: `${IRS}/newsroom/qualified-business-income-deduction`,
+  ebl: `${IRS}/newsroom/excess-business-losses`,
+  interest: `${IRS}/taxtopics/tc403`,
+  dividends: `${IRS}/taxtopics/tc404`,
+  gains: `${IRS}/taxtopics/tc409`,
+  home: `${IRS}/taxtopics/tc701`,
+  x1031: `${IRS}/businesses/small-businesses-self-employed/like-kind-exchanges-real-estate-tax-tips`,
+  k401: `${IRS}/retirement-plans/plan-participant-employee/retirement-topics-401k-and-profit-sharing-plan-contribution-limits`,
+  solo401k: `${IRS}/retirement-plans/one-participant-401k-plans`,
+  hsa: `${IRS}/publications/p969`,
+  ira: `${IRS}/retirement-plans/ira-deduction-limits`,
+  iraLimits: `${IRS}/retirement-plans/plan-participant-employee/retirement-topics-ira-contribution-limits`,
+  seHealth: `${IRS}/forms-pubs/about-form-7206`,
+  studentLoan: `${IRS}/taxtopics/tc456`,
+  itemize: `${IRS}/taxtopics/tc501`,
+  std: `${IRS}/taxtopics/tc551`,
+  mortgage: `${IRS}/publications/p936`,
+  salt: `${IRS}/taxtopics/tc503`,
+  charity: `${IRS}/taxtopics/tc506`,
+  medical: `${IRS}/taxtopics/tc502`,
+  intExp: `${IRS}/taxtopics/tc505`,
+  niit: `${IRS}/individuals/net-investment-income-tax`,
+  addlMed: `${IRS}/businesses/small-businesses-self-employed/questions-and-answers-for-the-additional-medicare-tax`,
+  brackets: `${IRS}/filing/federal-income-tax-rates-and-brackets`,
+  caRates: `${FTB}/tax-calculator-tables-rates.asp`,
+  caDed: `${FTB}/deductions/index.html`,
+  caCredits: `${FTB}/credits/index.html`,
+  caGains: `${FTB}/income-types/capital-gains-and-losses.html`,
+  caPassive: 'https://www.ftb.ca.gov/forms/2024/2024-3801-instructions.html',
+  sdi: 'https://edd.ca.gov/en/payroll_taxes/rates_and_withholding/',
+};
+
+type ModalId = 'reps' | 'sale' | 'brackets' | 'limits';
+
+/* Panels that start folded. Their headline figure stays in the title bar. */
+const SHUT_BY_DEFAULT: Record<string, boolean> = {
+  portfolio: true, adjust: true, itemized: true, qbi: true,
+};
 
 function normalize(d: any): TaxState {
   const base = defaultTaxState();
@@ -47,44 +104,81 @@ function normalize(d: any): TaxState {
 
 /* ------------------------------------------------------------------ helpers */
 
-const rate = (n: number) => `${n.toFixed(1)}%`;
 /** Accounting style: a subtraction reads in parentheses, the way it does on paper. */
 const less = (n: number) => n === 0 ? '—' : `(${money0(n)})`;
+const eq = (v: number) => `= ${money0(v)}`;
 
-/** A ladder rendered as a table, with the step you are standing on marked.
-    Not a chart: the reading task is looking up one row, and a table does that
-    better than any bar. */
-function Ladder({ brackets, taxable, label, note }: {
-  brackets: Bracket[]; taxable: number; label: string; note?: React.ReactNode;
+const rateOf = (b: Bracket) => pct(b.rate * 100, b.rate * 100 % 1 ? 1 : 0);
+/** Where an income stands on a ladder: its step, and that step's edges. */
+function standing(brackets: Bracket[], taxable: number) {
+  const i = Math.max(0, brackets.findIndex(b => taxable < b.upTo));
+  const from = i === 0 ? 0 : brackets[i - 1].upTo, to = brackets[i].upTo;
+  return { i, from, to, above: Math.max(0, taxable - from), room: to - taxable, next: brackets[i + 1] };
+}
+
+/** A ladder as a table, with the step you are standing on marked. Not a chart:
+    the reading task is looking up one row, and a table does that better than
+    any bar. */
+function Ladder({ brackets, taxable, label, info, more }: {
+  brackets: Bracket[]; taxable: number; label: string; info?: React.ReactNode; more?: string;
 }) {
-  const here = brackets.findIndex(b => taxable < b.upTo);
+  const here = standing(brackets, taxable).i;
+  const th = 'px-3 py-1.5 text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground';
   return (
-    <div className="sheet"><table className="ss with-notes ladder">
-      <colgroup><col className="c-lb" /><col className="c-n" /><col className="c-u" />
-        <col className="c-amt" /><col className="c-note" /></colgroup>
-      <tbody>
-        <Band span={5} tag={`you are at ${money0(taxable)}`}>{label}</Band>
-        {note && <G>{note}</G>}
-        {brackets.map((b, i) => {
-          const from = i === 0 ? 0 : brackets[i - 1].upTo;
-          const on = i === here;
-          return (
-            <tr key={i} className={on ? 'tot' : undefined}>
-              <td className="lb">{pct(b.rate * 100, b.rate * 100 % 1 ? 1 : 0)}{on && <span className="cov">you</span>}</td>
-              <td className="n" />
-              <td className="u" />
-              <td className="amt">{money0(from)} –&nbsp;{isFinite(b.upTo) ? money0(b.upTo) : 'up'}</td>
-              <td className="note">
-                {on ? <b>Your next dollar of this kind pays {pct(b.rate * 100)} here.</b>
-                  : isFinite(b.upTo)
-                    ? `${money0(b.upTo - from)} of income sits in this step.`
-                    : 'Everything above the step below.'}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table></div>
+    <section className="mb-3 overflow-hidden rounded-lg border border-line">
+      <h3 className="border-b border-line bg-page px-3 py-2 text-sm font-bold text-ink-strong">
+        {label}{info ? <InfoTip more={more}>{info}</InfoTip> : null}
+      </h3>
+      <table className="w-full text-sm tabular-nums">
+        <thead>
+          <tr className="border-b border-line/60">
+            <th scope="col" className={cn(th, 'text-left')}>Rate</th>
+            <th scope="col" className={cn(th, 'text-right')}>From</th>
+            <th scope="col" className={cn(th, 'text-right')}>To</th>
+          </tr>
+        </thead>
+        <tbody>
+          {brackets.map((b, i) => {
+            const from = i === 0 ? 0 : brackets[i - 1].upTo;
+            const on = i === here;
+            return (
+              <tr key={i} className={cn('border-b border-line/60 last:border-b-0', on ? 'bg-primary-tint font-bold text-ink-strong shadow-[inset_3px_0_0_var(--primary)]' : 'text-[#3a4352]')}>
+                <th scope="row" className="whitespace-nowrap px-3 py-1.5 text-left font-bold text-ink-strong">
+                  <span className="inline-block w-12">{rateOf(b)}</span>
+                  {on && <span className="rounded-full bg-primary px-1.5 py-px text-[0.6875rem] font-bold uppercase tracking-wide text-primary-foreground">You</span>}
+                </th>
+                <td className="whitespace-nowrap px-3 py-1.5 text-right">{money0(from)}</td>
+                <td className="whitespace-nowrap px-3 py-1.5 text-right">{isFinite(b.upTo) ? money0(b.upTo) : 'and up'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+/** One ladder's answer to "where am I in my bracket": the rate, a bar of the
+    position, and the two distances: above the bottom, and to the next step. */
+function BracketSpot({ brackets, taxable, label }: { brackets: Bracket[]; taxable: number; label: string }) {
+  const p = standing(brackets, taxable);
+  const open = !isFinite(p.to);
+  const at = open ? 100 : Math.min(100, Math.max(0, p.above / (p.to - p.from) * 100));
+  return (
+    <div className="min-w-0 rounded-lg bg-page p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">{label}</span>
+        <span className="text-lg font-extrabold leading-none tabular-nums text-ink-strong">{rateOf(brackets[p.i])}</span>
+      </div>
+      <div aria-hidden className="relative mb-2 mt-3 h-1.5 rounded-full bg-line">
+        <span className="absolute inset-y-0 left-0 rounded-full bg-primary" style={{ width: `${at}%` }} />
+        {!open && <span className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card bg-primary" style={{ left: `${at}%` }} />}
+      </div>
+      <div className="flex justify-between gap-2 text-[0.8125rem] leading-snug text-muted-foreground">
+        <span><b className="tabular-nums text-ink-strong">{money0(p.above)}</b> above bottom</span>
+        <span className="text-right">{p.next ? <><b className="tabular-nums text-ink-strong">{money0(p.room)}</b> to {rateOf(p.next)}</> : 'top bracket'}</span>
+      </div>
+    </div>
   );
 }
 
@@ -92,10 +186,14 @@ function Ladder({ brackets, taxable, label, note }: {
 
 export default function TaxPage() {
   const [s, setS] = useState<TaxState>(defaultTaxState);
-  const [tab, setTab] = useState<TabId>('income');
-  const [shutSecs, setShutSecs] = useState<Record<string, boolean>>({});
+  const [shut, setShut] = useState<Record<string, boolean>>({});
   const [hydrated, setHydrated] = useState(false);
-  /* the capital gains tab models a sale that is not in your base return */
+  /* reference material and what-ifs open as popups, off the page */
+  const [modal, setModal] = useState<ModalId | null>(null);
+  /* the ring slice being pointed at, shared with the cards beside the ring */
+  const [slice, setSliceRaw] = useState<string | null>(null);
+  const setSlice = (k: string | null) => setSliceRaw(k);
+  /* the sale panel models a sale that is not in your base return */
   const [gLong, setGLong] = useState(500000);
   const [gShort, setGShort] = useState(0);
   const [gRecapture, setGRecapture] = useState(0);
@@ -110,560 +208,524 @@ export default function TaxPage() {
   }, []);
   useEffect(() => { if (hydrated) saveJSON(DRAFT_KEY, s); }, [s, hydrated]);
 
-  const secOpen = (id: string) => !shutSecs[id];
-  const fold = (id: string) => ({
-    open: secOpen(id),
-    onToggle: () => setShutSecs(p => ({ ...p, [id]: !p[id] })),
-  });
-  const allShut = INPUT_SECS.every(id => shutSecs[id]);
+  const isOpen = (id: string) => !(shut[id] ?? SHUT_BY_DEFAULT[id] ?? false);
+  const fold = (id: string) => ({ open: isOpen(id), onOpenChange: (o: boolean) => setShut(p => ({ ...p, [id]: !o })) });
 
   /* ---------- derived ---------- */
   const { fed, ca } = tablesFor(s.year);
   const r = useMemo(() => computeTax(s), [s]);
   const reps = useMemo(() => repsComparison(s), [s]);
-  /* the sale on tab 3 is layered on the base return, never mixed into it */
+  /* the sale is layered on the base return, never mixed into it */
   const sale = useMemo(
     () => gainsImpact(s, Math.max(0, gLong - gExclusion), gShort, gRecapture),
     [s, gLong, gShort, gRecapture, gExclusion]);
 
-  const statusLabel = FILING_STATUSES.find(f => f.id === s.status)!.short;
+  const st = s.status;
+  const statusLabel = FILING_STATUSES.find(f => f.id === st)!;
   const earned = s.wages + s.spouseWages + s.seNetProfit;
   const portfolio = s.interest + s.ordinaryDividends + s.shortTermGains +
     s.longTermGains + s.unrecaptured1250 + s.otherIncome;
+  const slices: { key: SliceKey; label: string; value: number }[] = [
+    { key: 'fed', label: 'Federal tax', value: r.federalTotal },
+    { key: 'ca', label: 'California tax', value: r.caTotal },
+    { key: 'keep', label: 'You keep', value: Math.max(0, r.afterTax) },
+  ];
+  const share = (n: number) => pct(r.grossIncome > 0 ? n / r.grossIncome * 100 : 0);
 
-  /* Screening context. These are benchmarks, not rules — they exist so a
-     number on screen carries a sense of whether it is normal. */
-  const marginalNote = r.marginalCombined > r.fedBracketRate + r.caBracketRate + 1
-    ? <span className="warn">higher, because you are standing inside a phase-out</span>
-    : r.marginalCombined < r.fedBracketRate + r.caBracketRate - 1
-      ? <span className="ok">lower, because a deduction is still growing with your income</span>
-      : <span className="ok">the same, so nothing is phasing in or out on you</span>;
+  /* Screening context. A benchmark, not a rule: it says whether the measured
+     marginal rate is what a bracket table would have told you. */
+  const bracketSum = r.fedBracketRate + r.caBracketRate;
+  const marginalNote = r.marginalCombined > bracketSum + 1
+    ? { tone: 'text-warning', text: `above your ${pct(bracketSum)} brackets: a phase-out` }
+    : r.marginalCombined < bracketSum - 1
+      ? { tone: 'text-success', text: `below your ${pct(bracketSum)} brackets: a deduction is still growing` }
+      : { tone: 'text-success', text: 'matches your brackets' };
 
   const reset = () => { if (confirm('Clear every figure and start over?')) setS(defaultTaxState()); };
 
-  /* ---------------------------------------------------------------- summary */
-  const Summary = () => (
-    <div className="sumry">
-      <div className="hero"><div className="k">Total tax</div>
-        <div className="v">{money0(r.totalTax)}</div>
-        <div className="s">on {money0(r.grossIncome)} of income</div></div>
-      <div><div className="k">Federal</div><div className="v">{money0(r.federalTotal)}</div>
-        <div className="s">{money0(r.seTax)} of it self-employment</div></div>
-      <div><div className="k">California</div><div className="v">{money0(r.caTotal)}</div>
-        <div className="s">{pct(r.grossIncome > 0 ? r.caTotal / r.grossIncome * 100 : 0)} of income</div></div>
-      <div><div className="k">Effective rate</div><div className="v">{pct(r.effectiveRate)}</div>
-        <div className="s">{pct(r.effectiveOnAgi)} of AGI</div></div>
-      <div><div className="k">Marginal rate</div><div className="v">{pct(r.marginalCombined)}</div>
-        <div className="s">on your next dollar</div></div>
-
-      <div><div className="k">You keep</div><div className="v pos">{money0(r.afterTax)}</div>
-        <div className="s">after federal and state</div></div>
-      <div><div className="k">AGI</div><div className="v">{money0(r.agi)}</div>
-        <div className="s">{money0(r.adjustments)} adjusted out</div></div>
-      <div><div className="k">Taxable income</div><div className="v">{money0(r.taxableIncome)}</div>
-        <div className="s">after {money0(r.deductionUsed + r.qbiDeduction)} deducted</div></div>
-      <div><div className="k">Rental loss used</div>
-        <div className={`v ${r.rentalSuspended > 0 ? 'warn' : ''}`}>{money0(r.rentalAllowed)}</div>
-        <div className="s">{r.rentalSuspended > 0 ? `${money0(r.rentalSuspended)} suspended` : 'nothing trapped'}</div></div>
-      <div><div className="k">Professional status</div>
-        <div className={`v ${reps.saving > 0 ? 'pos' : ''}`}>{money0(reps.saving)}</div>
-        <div className="s">{s.reps ? 'saved by electing it' : 'if you qualify'}</div></div>
+  /* small shorthands so a row reads as one line */
+  const $ = (value: number, onChange: (n: number) => void) => <NumberField value={value} onChange={onChange} />;
+  const f = <K extends keyof TaxState>(k: K) => $(s[k] as number, v => set(k, v as TaxState[K]));
+  const count = (k: 'childrenUnder17' | 'otherDependents') => (
+    <div className="flex items-center gap-1.5">
+      <Stepper value={s[k]} onChange={v => set(k, v)} step={1} min={0} max={8} />
+      <NumberField value={s[k]} onChange={v => set(k, Math.max(0, Math.min(8, Math.round(v))))} fmt="raw" step={1} min={0} max={8} />
     </div>
   );
 
+  /* professional status popup: one figure, without and with the election */
+  const cmpTh = 'w-28 py-2 pl-3 text-right text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground';
+  const cmpRow = (label: string, off: number, on: number) => (
+    <tr key={label} className="border-b border-line/60 last:border-b-0">
+      <th scope="row" className="py-2 pr-3 text-left font-normal text-[#3a4352]">{label}</th>
+      <td className="py-2 pl-3 text-right text-muted-foreground">{money0(off)}</td>
+      <td className={cn('py-2 pl-3 text-right font-bold', Math.round(on) === Math.round(off) ? 'text-muted-foreground' : 'text-ink-strong')}>{money0(on)}</td>
+    </tr>
+  );
+  /* sale popup */
+  const saltLost = Math.max(0, sale.without.saltAllowed - sale.with.saltAllowed);
+  /* the federal share split by what caused it; the rows add up to it exactly */
+  const dGains = (sale.with.fedGainsTax + sale.with.fed1250Tax) - (sale.without.fedGainsTax + sale.without.fed1250Tax);
+  const dOrdinary = sale.with.fedOrdinaryTax - sale.without.fedOrdinaryTax;
+  const dOther = sale.fedDelta - dGains - dOrdinary - sale.niitDelta;
+  const cgRate = (r: { taxableIncome: number }) => rateOf(fed.capGains[st][standing(fed.capGains[st], r.taxableIncome).i]);
+  /* a ladder the sale climbed: the new rate, and how far past its line */
+  const bump = (who: string, brackets: Bracket[], before: number, after: number) => {
+    const a = standing(brackets, before), b = standing(brackets, after);
+    return b.i > a.i ? [{ who, rate: rateOf(brackets[b.i]), over: after - b.from, line: b.from }] : [];
+  };
+  const bumps = [
+    ...bump('federal gains', fed.capGains[st], sale.without.taxableIncome, sale.with.taxableIncome),
+    ...bump('California', ca.brackets[st], sale.without.caTaxableIncome, sale.with.caTaxableIncome),
+  ];
+  const saleRows: { label: string; v: number; info: React.ReactNode; more: string }[] = [
+    { label: 'Capital gains tax', v: dGains,
+      info: 'Long-term gains pay 0, 15 or 20%. The rate is set by your total taxable income with the gain stacked on top. Depreciation recapture pays up to 25%.', more: U.gains },
+    { label: '3.8% investment surtax', v: sale.niitDelta,
+      info: <>The net investment income tax: 3.8% on investment income, this gain included, once your income passes {money0(fed.niitFrom[st])}.</>, more: U.niit },
+    { label: 'Tax on other income', v: dOrdinary,
+      info: <>The gain raises your income, which shrinks deductions tied to income{saltLost > 0 ? <> (here, {money0(saltLost)} less state and local tax deduction)</> : null}. Your other income then pays more tax. A short-term gain is taxed here too.</>, more: U.salt },
+    { label: 'Other effects', v: dOther,
+      info: 'Credits that shrink as income rises, mainly the child tax credit. The gain pushes your income into their phase-out.', more: U.ctc },
+  ];
+
+  /* a popup; a plain function, not a component, so typing in one keeps focus */
+  const modalEl = (id: ModalId, title: string, desc: string, width: string, body: React.ReactNode) => (
+    <Dialog open={modal === id} onOpenChange={o => setModal(o ? id : null)}>
+      <DialogContent className={width}>
+        <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{desc}</DialogDescription></DialogHeader>
+        <div className="min-w-0">{body}</div>
+      </DialogContent>
+    </Dialog>
+  );
+
+  /* ================================================================= render */
   return (
     <>
-      <div className="wrap">
-        <div className="hero">
-          <h1>Income Tax Calculator</h1>
-          <p>Federal and California, {s.year}. Everything stays on this device.</p>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-[1.75rem] font-extrabold leading-tight tracking-[-0.015em] text-ink-strong">Income Tax Calculator</h1>
+          <p className="text-[0.9375rem] text-muted-foreground">Federal and California, {s.year}. Everything stays on this device.</p>
         </div>
-        <div className="deal-actions">
-          <UnitToggle options={TAX_YEARS.map(y => ({ u: String(y), label: String(y) }))}
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
+          <Segmented aria-label="Tax year" options={TAX_YEARS.map(y => ({ u: String(y), label: String(y) }))}
             value={String(s.year)} onChange={u => set('year', Number(u) as TaxYear)} />
-          <button className="btn ghost" onClick={reset}>Reset</button>
+          <Button variant="ghost" onClick={reset}>Reset</Button>
         </div>
       </div>
 
-      <nav className="tabs">
-        <button className={`tab${tab === 'income' ? ' on' : ''}`} onClick={() => setTab('income')}>
-          Income &amp; deductions</button>
-        <button className={`tab${tab === 'summary' ? ' on' : ''}`} onClick={() => setTab('summary')}>
-          Tax Summary <span className="badge">{money0(r.totalTax)}</span></button>
-        <button className={`tab${tab === 'gains' ? ' on' : ''}`} onClick={() => setTab('gains')}>
-          Capital Gains <span className="badge">{money0(sale.totalDelta)}</span></button>
-        <button className={`tab${tab === 'brackets' ? ' on' : ''}`} onClick={() => setTab('brackets')}>
-          Brackets</button>
-      </nav>
+      <div className="grid items-start gap-4 min-[1100px]:grid-cols-[360px_minmax(0,1fr)]">
+        {/* ============================================ LEFT: INPUTS */}
+        <div className="flex min-w-0 flex-col gap-3">
+          <Panel dense title="Filing" tag={`${s.year} · ${statusLabel.short}`} {...fold('filing')}>
+            <Field label="Filing status" info="Sets your brackets, standard deduction and phase-outs. Filing separately usually forfeits the rental loss allowance." more={U.filing}>
+              <NativeSelect size="sm" className="w-44 shrink-0" value={st} aria-label="Filing status"
+                onChange={ev => set('status', ev.target.value as FilingStatus)}>
+                {FILING_STATUSES.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}
+              </NativeSelect>
+            </Field>
+            <Field label="Children under 17" hint={`${eq(s.childrenUnder17 * fed.childCredit)} credit`}
+              info={`${money0(fed.childCredit)} each, phasing out above ${money0(fed.creditPhaseoutFrom[st])} of income.`} more={U.ctc}>
+              {count('childrenUnder17')}</Field>
+            <Field label="Other dependents" hint={`${eq(s.otherDependents * fed.otherDependentCredit)} credit`}
+              info={`${money0(fed.otherDependentCredit)} each for older children or parents you support.`} more={U.ctc}>
+              {count('otherDependents')}</Field>
+          </Panel>
 
-      {ca.provenance === 'carried' && (
-        <div className="notice warn">
-          <div><b>California thresholds are the {ca.scheduleYear} schedule</b>
-            The rate ladder itself is statute and has not moved: 1 to 12.3% plus the 1% surcharge
-            over $1M. Only the thresholds index, at roughly 3% a year, and above about $70,000 of
-            taxable income they are fixed dollar amounts — so the drift is worth a few hundred
-            dollars to you, not a few thousand. Confirm at ftb.ca.gov before you file.</div>
+          <Panel dense title="Earned income" tag={money0(earned)} {...fold('earned')}>
+            <Field label="Your wages" hint="gross, before 401(k)"
+              info={<>Enter <b>gross</b> pay, before your 401(k). The deferral comes off under Adjustments.</>} more={U.payroll}>
+              {f('wages')}</Field>
+            <Field label="Spouse wages" hint="gross, before 401(k)" info="Gross, before 401(k). Has its own Social Security wage base." more={U.payroll}>
+              {f('spouseWages')}</Field>
+            <Field label="Self-employment net profit" info="Schedule C profit: commissions after business expenses." more={U.schedC}>
+              {f('seNetProfit')}</Field>
+            <Line total label="Self-employment tax" value={money0(r.seTax)}
+              hint={s.seNetProfit > 0 ? `${pct(r.seTax / s.seNetProfit * 100)} of profit` : undefined}
+              info={<>15.3% up to {money0(fed.ssWageBase)} of earnings, 2.9% above. Half is deductible.</>} more={U.seTax} />
+          </Panel>
+
+          <Panel dense title="Real estate" tag={`${money(s.rentalNet)} · ${money0(r.rentalAllowed)} used`} {...fold('realestate')}>
+            <Field label="Net rental income or loss" hint="a loss is a negative number"
+              info="After depreciation. Enter a loss as a negative number." more={U.rental}>
+              {f('rentalNet')}</Field>
+            <Field label="Real estate professional"
+              info={<>750+ hours in real property work and more than half your working time. Makes rental losses <b>non-passive</b>. Federal only: California ignores it.</>} more={U.reps}>
+              <Toggle checked={s.reps} onChange={v => set('reps', v)} /></Field>
+            <Field label="Prior suspended losses" info="Passive losses carried in from earlier years. They release against passive income or on sale." more={U.f8582}>
+              {f('passiveCarryforward')}</Field>
+            <Field label="Rentals qualify for §199A" info="On if the rentals are a trade or business, or meet the 250-hour safe harbor." more={U.qbi}>
+              <Toggle checked={s.rentalQualifiesQbi} onChange={v => set('rentalQualifiesQbi', v)} /></Field>
+            <Line label="Special allowance available" value={money0(r.specialAllowance)}
+              info={<>Up to $25,000 of rental loss, phased out between $100k and $150k of income.{r.specialAllowance > 0 ? '' : ' Yours is fully phased out.'}</>} more={U.passive} />
+            <Line total label="Loss deducted this year" value={money0(r.rentalAllowed)} tone={r.rentalSuspended > 0 ? 'warn' : undefined}
+              hint={r.rentalSuspended > 0 ? `${money0(r.rentalSuspended)} suspended` : s.rentalNet < 0 ? 'all of it' : undefined}
+              info={r.rentalSuspended > 0 ? <><b>{money0(r.rentalSuspended)} suspended</b> and carried forward, not lost.</> : 'All of it is deductible this year.'} more={U.passive} />
+            {r.eblDisallowed > 0 && (
+              <Line label="Blocked by the excess business loss cap" value={money0(r.eblDisallowed)} tone="warn"
+                info={<>A business loss over {money0(fed.excessBusinessLoss[st])} carries forward instead.</>} more={U.ebl} />
+            )}
+          </Panel>
+
+          <Panel dense title="Portfolio income" tag={money0(portfolio)} {...fold('portfolio')}>
+            <Field label="Interest" info={<>Ordinary rates. Over {money0(fed.niitFrom[st])} of income it also pays the 3.8% surtax.</>} more={U.interest}>
+              {f('interest')}</Field>
+            <Field label="Ordinary dividends" info="Form 1099-DIV box 1a. Includes the qualified part below." more={U.dividends}>
+              {f('ordinaryDividends')}</Field>
+            <Field label="Of which qualified" className="pl-3" info="Box 1b. Taxed at the 0/15/20% gains rates." more={U.dividends}>
+              {f('qualifiedDividends')}</Field>
+            <Field label="Short-term gains" info="Held a year or less. Taxed as ordinary income." more={U.gains}>
+              {f('shortTermGains')}</Field>
+            <Field label="Long-term gains" info="Held over a year. To test one sale, use Sell an asset instead." more={U.gains}>
+              {f('longTermGains')}</Field>
+            <Field label="Depreciation recapture" info="Unrecaptured §1250 gain from a rental sale. Taxed at up to 25%." more={U.gains}>
+              {f('unrecaptured1250')}</Field>
+            <Field label="Other income" info="Flip profit, K-1 income, anything else at ordinary rates.">
+              {f('otherIncome')}</Field>
+          </Panel>
+
+          <Panel dense title="Adjustments" tag={money0(r.adjustments)} {...fold('adjust')}>
+            <Field label="401(k) elective deferral"
+              info={`${money0(fed.elective401k)} limit for ${s.year}. Catch-up: ${money0(fed.catchUp401k)} at 50, ${money0(fed.superCatchUp401k)} at 60 to 63.`} more={U.k401}>
+              {f('deferral401k')}</Field>
+            <Field label="Employer / solo 401(k) or SEP" info="The employer side of a solo 401(k) or SEP. Often your biggest lever on Schedule C income." more={U.solo401k}>
+              {f('employer401k')}</Field>
+            <Field label="HSA contribution" info={`${money0(fed.hsaSelf)} self, ${money0(fed.hsaFamily)} family. California does not allow it.`} more={U.hsa}>
+              {f('hsa')}</Field>
+            <Field label="Traditional IRA" info={`${money0(fed.iraLimit)} limit. If a workplace plan covers you, deductible only under an income limit.`} more={U.ira}>
+              {f('tradIra')}</Field>
+            <Field label="Self-employed health insurance" info="Premiums for you and family, up to your net self-employment profit." more={U.seHealth}>
+              {f('seHealthIns')}</Field>
+            <Field label="Other adjustments" info="Student loan interest, educator expenses and similar." more={U.studentLoan}>
+              {f('otherAdjust')}</Field>
+            <Line label="Half of self-employment tax" value={money0(r.halfSeTax)} info="Automatic: the employer-equivalent half." more={U.seTax} />
+            <Line total label="Total adjustments" value={money0(r.adjustments)}
+              info={<>Taken before AGI, so they also lower every threshold tied to it. {money0(r.totalIncome)} becomes {money0(r.agi)}.</>} />
+          </Panel>
+
+          <Panel dense title="Deductions" tag={`${money0(r.deductionUsed)} · ${r.deductionKind}`} {...fold('itemized')}>
+            <Field label="Mortgage interest" info="On up to $750,000 of home debt. Rental interest goes in the rental figure." more={U.mortgage}>
+              {f('mortgageInterest')}</Field>
+            <Field label="Property tax" info="Your residence only. Rental property tax goes in the rental figure." more={U.salt}>
+              {f('propertyTax')}</Field>
+            <Field label="Charitable gifts" hint={r.charitableAllowed !== s.charitable ? `${money0(r.charitableAllowed)} counts` : undefined}
+              info={fed.charitableAgiFloor > 0 ? `From ${s.year}, the first ${pct(fed.charitableAgiFloor * 100, 1)} of AGI (${money0(fed.charitableAgiFloor * r.agi)}) does not count.` : 'Cash gifts to public charities, up to 60% of AGI.'} more={U.charity}>
+              {f('charitable')}</Field>
+            <Field label="Medical expenses" hint={s.medical > 0 ? `${money0(r.medicalAllowed)} counts` : undefined}
+              info={<>Only the part above 7.5% of AGI ({money0(0.075 * r.agi)}) counts.</>} more={U.medical}>
+              {f('medical')}</Field>
+            <Field label="Other itemized" info="Investment interest, disaster casualty losses." more={U.intExp}>
+              {f('otherItemized')}</Field>
+            <SectionLabel>State and local tax</SectionLabel>
+            <Line label="Paid" value={money0(r.saltPaid)}
+              info={<>{money0(s.propertyTax)} property tax plus {money0(r.caTotal)} California income tax.</>} more={U.salt} />
+            <Line label="Your cap this year" value={money0(r.saltCapUsed)}
+              info={<>{money0(fed.saltCap[st])} cap, shrinking 30¢ per dollar of income over {money0(fed.saltPhasedownFrom[st])}, down to {money0(fed.saltFloor[st])}.</>} more={U.salt} />
+            <Line label="Deductible" value={money0(r.saltAllowed)} tone={r.saltPaid > r.saltAllowed ? 'warn' : undefined}
+              hint={r.saltPaid > r.saltAllowed ? `${money0(r.saltPaid - r.saltAllowed)} gets no deduction` : 'all of it counts'} />
+            <SectionLabel>Which deduction wins</SectionLabel>
+            <Line label="Standard" value={money0(r.standardTotal)} strong={r.deductionKind === 'standard'}
+              info={fed.charitableNonItemizer[st] > 0 ? `${money0(fed.standardDeduction[st])} plus up to ${money0(fed.charitableNonItemizer[st])} of charitable gifts.` : 'A flat amount, no receipts.'} more={U.std} />
+            <Line label="Itemized" value={money0(r.itemizedTotal)} strong={r.deductionKind === 'itemized'}
+              info="Mortgage interest, capped state and local tax, charity, medical." more={U.itemize} />
+            <Line total label={`You take the ${r.deductionKind}`} value={money0(r.deductionUsed)}
+              hint={`${money0(Math.abs(r.itemizedTotal - r.standardTotal))} better than the alternative`}
+              info="You get whichever is larger, automatically." more={U.itemize} />
+          </Panel>
+
+          <Panel dense title="Business income deduction" tag={money0(r.qbiDeduction)} {...fold('qbi')}>
+            <Line label="Qualified business income" value={money0(r.qbi)}
+              info="Schedule C profit less its share of SE tax, health insurance and retirement deductions." more={U.qbi} />
+            <Field label="W-2 wages your business paid"
+              info={`Over ${money0(fed.qbiThreshold[st])} of taxable income, the deduction is capped at half of this.`} more={U.qbi}>
+              {f('qbiWages')}</Field>
+            <Field label="Business property basis" info="Original cost of depreciable property. Feeds the other cap: 25% of wages plus 2.5% of this." more={U.qbi}>
+              {f('qbiProperty')}</Field>
+            <Line total label="§199A deduction" value={money0(r.qbiDeduction)} tone={r.qbiWageLimited ? 'warn' : undefined}
+              hint={r.qbiWageLimited ? 'cut by the wage limit' : r.qbi > 0 ? `${pct(r.qbiDeduction / r.qbi * 100)} of business income` : undefined}
+              info={<>20% of business income. Real estate brokerage is <b>not</b> a restricted service trade. {r.qbiWageLimited ? 'Yours is cut by the wage limit. ' : ''}California does not allow it.</>} more={U.qbi} />
+          </Panel>
         </div>
-      )}
 
-      {/* ====================================== TAB 1 — INCOME & DEDUCTIONS */}
-      <section className={`pane${tab === 'income' ? ' on' : ''}`}>
-        <Summary />
+        {/* ============================================ RIGHT: RESULTS */}
+        <div className="flex min-w-0 flex-col gap-4">
+          {/* where the income goes: a ring, and a card per slice that lights up with it */}
+          <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)]">
+            <div className="flex min-w-0 flex-col rounded-lg bg-card p-4 shadow-tight">
+              <div className="mb-3 text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">Where your {money0(r.grossIncome)} goes</div>
+              <div className="flex flex-1 items-center justify-center md:px-2">
+                <PaymentPie soft list={false} size={184} colors={TAX_PIE} centerLabel="Total tax" centerNote={`${pct(r.effectiveRate)} of income`}
+                  title="Total tax" total={r.totalTax} parts={slices} active={slice} onActive={setSlice} />
+              </div>
+            </div>
+            <div className="grid min-w-0 grid-cols-6 gap-3">
+              {slices.map(p => {
+                const on = slice === p.key;
+                return (
+                  <div key={p.key} onPointerEnter={() => setSlice(p.key)} onPointerLeave={() => setSlice(null)}
+                    style={on ? { boxShadow: `inset 0 0 0 2px ${TAX_PIE[p.key]}, var(--shadow-tight)` } : undefined}
+                    className={cn('flex min-w-0 flex-col gap-1 rounded-lg bg-card p-4 shadow-tight transition-[opacity,box-shadow] duration-200',
+                      p.key === 'keep' ? 'col-span-6 sm:col-span-2' : 'col-span-3 sm:col-span-2', slice && !on && 'opacity-50')}>
+                    <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">
+                      <span className="size-2.5 shrink-0 rounded-full" style={{ background: TAX_PIE[p.key] }} />{p.label}
+                    </div>
+                    <div className="text-[1.5rem] font-extrabold leading-tight tracking-[-0.015em] tabular-nums text-ink-strong min-[1500px]:text-[1.75rem]">{money0(p.value)}</div>
+                    <div className="text-[0.8125rem] leading-snug text-muted-foreground">{share(p.value)} of income</div>
+                  </div>
+                );
+              })}
+              <div className="col-span-3 grid sm:col-span-2"><Stat label="Effective Rate" value={pct(r.effectiveRate)} note={`of all income · ${pct(r.effectiveOnAgi)} of AGI`}
+                info={<>{money0(r.totalTax)} of tax on {money0(r.grossIncome)}. The AGI rate is after retirement and health contributions.</>} more={U.brackets} /></div>
+              <div className="col-span-3 grid sm:col-span-2"><Stat label="Marginal Rate" value={pct(r.marginalCombined)}
+                note={<>on your next dollar<span className={cn('block', marginalNote.tone)}>{marginalNote.text}</span></>}
+                info={<><b>Measured</b> by adding $1,000 of income and rerunning the return, so phase-outs show up.
+                  <span className="mt-1.5 block">Federal {pct(r.marginalFederal)} measured, {pct(r.fedBracketRate, 0)} bracket.</span>
+                  <span className="block">California {pct(r.marginalCa)} measured, {pct(r.caBracketRate)} bracket.</span>
+                  <span className="block">On a long-term gain: {pct(r.marginalGains)}.</span></>} more={U.brackets} /></div>
+              <div className="col-span-6 grid sm:col-span-2"><Stat label="CA Rate" value={share(r.caTotal)}
+                note={<>of all income<span className="block">{pct(r.caBracketRate)} California bracket</span></>}
+                info={<>{money0(r.caTotal)} of California tax on {money0(r.grossIncome)}. Your next dollar pays {pct(r.marginalCa)}.</>} more={U.caRates} /></div>
+            </div>
+          </div>
 
-        <div className="sow-bar">
-          <button className="btn" onClick={() => setShutSecs(
-            allShut ? {} : Object.fromEntries(INPUT_SECS.map(id => [id, true])))}>
-            {allShut ? 'Expand all' : 'Collapse all'}</button>
-          <span className="bar-note">Each section keeps its headline figure when shut.</span>
-        </div>
+          {/* what-ifs and reference tables: each opens a popup */}
+          <div className="grid gap-3 sm:grid-cols-2 min-[1700px]:grid-cols-4 print:hidden">
+            {([
+              ['reps', 'badge', 'Professional status', reps.saving > 0 ? `Worth ${money0(reps.saving)} this year` : 'Worth nothing on these numbers'],
+              ['sale', 'sell', 'Sell an asset', `${money0(sale.totalDelta)} tax on a ${money0(sale.gainTotal)} gain`],
+              ['brackets', 'stacked_bar_chart', 'Brackets', `${pct(r.fedBracketRate, 0)} federal · ${pct(r.caBracketRate)} California`],
+              ['limits', 'rule', 'Thresholds and limits', 'Caps, phase-outs and contribution limits'],
+            ] as const).map(([id, icon, label, sub]) => (
+              <button key={id} type="button" aria-haspopup="dialog" onClick={() => setModal(id)}
+                className="group flex min-w-0 items-center gap-3 rounded-lg bg-card p-3 text-left shadow-tight outline-none transition-shadow hover:shadow-fluffy focus-visible:ring-2 focus-visible:ring-ring/50">
+                <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary-tint text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                  <Icon name={icon} size={20} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[0.9375rem] font-bold leading-snug text-ink-strong">{label}</span>
+                  <span className="block truncate text-[0.8125rem] leading-snug tabular-nums text-muted-foreground">{sub}</span>
+                </span>
+                <Icon name="chevron_right" size={20} className="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+              </button>
+            ))}
+          </div>
 
-        <div className="sheet one"><table className="ss with-notes">
-          <colgroup>
-            <col className="c-lb" /><col className="c-n" /><col className="c-u" />
-            <col className="c-amt" /><col className="c-note" />
-          </colgroup>
-          <tbody>
-
-          <Band span={5} {...fold('filing')} tag={`${s.year} · ${statusLabel}`}>Filing</Band>
-          {secOpen('filing') && <>
-          <R label="Filing status" note="Married filing separately loses the passive loss allowance entirely if you lived together at any point in the year." ctl={
-            <select className="sel-city" value={s.status}
-              onChange={ev => set('status', ev.target.value as FilingStatus)}>
-              {FILING_STATUSES.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-            </select>} />
-          <V label="Tax year" value={String(s.year)}
-            note={<>Switch it in the header. Federal figures from {fed.source}.</>} />
-          <R label="Children under 17" amount={money0(s.childrenUnder17 * fed.childCredit)}
-            note={`${money0(fed.childCredit)} credit each, phasing out above ${money0(fed.creditPhaseoutFrom[s.status])} of income.`} ctl={
-            <Count value={s.childrenUnder17} onChange={v => set('childrenUnder17', v)} max={8} />} />
-          <R label="Other dependents" amount={money0(s.otherDependents * fed.otherDependentCredit)}
-            note={`${money0(fed.otherDependentCredit)} each. Older children, parents you support.`} ctl={
-            <Count value={s.otherDependents} onChange={v => set('otherDependents', v)} max={8} />} />
-          </>}
-
-          <Band span={5} {...fold('earned')} tag={money0(earned)}>Earned income</Band>
-          {secOpen('earned') && <>
-          <G>Enter wages <b>gross</b>, before your 401(k) comes out — the deferral is subtracted below, so entering the W-2 box 1 figure would take it twice.</G>
-          <R label="Your wages" amount={money0(s.wages)}
-            note="Before any deferral. Fills the Social Security wage base before self-employment does.">
-            <Money value={s.wages} onChange={v => set('wages', v)} /></R>
-          <R label="Spouse wages" amount={money0(s.spouseWages)}
-            note="Has its own Social Security base, so it does not crowd out yours.">
-            <Money value={s.spouseWages} onChange={v => set('spouseWages', v)} /></R>
-          <R label="Self-employment net profit" amount={money0(s.seNetProfit)}
-            note="Schedule C. Commission income after business expenses — this is what pays self-employment tax.">
-            <Money value={s.seNetProfit} onChange={v => set('seNetProfit', v)} /></R>
-          <V cls="tot" label="Self-employment tax" value={money0(r.seTax)}
-            unit={pct(s.seNetProfit > 0 ? r.seTax / s.seNetProfit * 100 : 0)}
-            note={<>15.3% until earnings pass {money0(fed.ssWageBase)}, then 2.9% plus surtax. Half of it, {money0(r.halfSeTax)}, comes back as a deduction.</>} />
-          </>}
-
-          <Band span={5} {...fold('portfolio')} tag={money0(portfolio)}>Portfolio income</Band>
-          {secOpen('portfolio') && <>
-          <G>Qualified dividends and long-term gains ride the 0/15/20 ladder; everything else here is ordinary. Above {money0(fed.niitFrom[s.status])} of income all of it also picks up the 3.8% investment surtax.</G>
-          <R label="Interest" amount={money0(s.interest)} note="Ordinary rates, and inside net investment income.">
-            <Money value={s.interest} onChange={v => set('interest', v)} /></R>
-          <R label="Ordinary dividends" amount={money0(s.ordinaryDividends)}
-            note="The total from box 1a. The qualified part below is a slice of this, not an addition.">
-            <Money value={s.ordinaryDividends} onChange={v => set('ordinaryDividends', v)} /></R>
-          <R label="— of which qualified" amount={money0(s.qualifiedDividends)}
-            note="Box 1b. Taxed on the gains ladder instead of at ordinary rates.">
-            <Money value={s.qualifiedDividends} onChange={v => set('qualifiedDividends', v)} /></R>
-          <R label="Short-term gains" amount={money0(s.shortTermGains)}
-            note="Held a year or less. No rate break at all — these are ordinary income.">
-            <Money value={s.shortTermGains} onChange={v => set('shortTermGains', v)} /></R>
-          <R label="Long-term gains" amount={money0(s.longTermGains)}
-            note="Held over a year. Model a specific sale on the Capital Gains tab instead of here.">
-            <Money value={s.longTermGains} onChange={v => set('longTermGains', v)} /></R>
-          <R label="Depreciation recapture" amount={money0(s.unrecaptured1250)}
-            note="Unrecaptured §1250 gain on a rental sale. Its own ceiling of 25%, above the gains rates.">
-            <Money value={s.unrecaptured1250} onChange={v => set('unrecaptured1250', v)} /></R>
-          <R label="Other income" amount={money0(s.otherIncome)}
-            note="Flip profit, K-1 ordinary income, anything else taxed at ordinary rates.">
-            <Money value={s.otherIncome} onChange={v => set('otherIncome', v)} /></R>
-          </>}
-
-          <Band span={5} {...fold('realestate')}
-            tag={`${money(s.rentalNet)} · ${money0(r.rentalAllowed)} used`}>Real estate</Band>
-          {secOpen('realestate') && <>
-          <G>A rental loss is <b>passive</b> unless you qualify as a professional. The $25,000 allowance phases out between $100k and $150k of income and is gone above it, so at Bay Area incomes an unelected loss usually deducts <b>nothing</b> this year.</G>
-          <R label="Net rental income or loss" amount={money(s.rentalNet)}
-            note="After depreciation. A negative number is the loss the rules below decide what to do with.">
-            <Money value={s.rentalNet} onChange={v => set('rentalNet', v)} /></R>
-          <R label="Real estate professional" note="§469(c)(7): over 750 hours in real property trades, more than half your working time, and material participation in the rentals. An agent's hours count; a passive investor's do not." ctl={
-            <Switch checked={s.reps} onChange={v => set('reps', v)} />} />
-          <R label="Prior suspended losses" amount={money0(s.passiveCarryforward)}
-            note="Losses trapped in earlier years. Electing professional status now does not free these — only passive income or selling the property does.">
-            <Money value={s.passiveCarryforward} onChange={v => set('passiveCarryforward', v)} /></R>
-          <R label="Rentals qualify for §199A" note="A rental rises to a trade or business, or meets the 250-hour safe harbor. Adds rental profit to the deduction below." ctl={
-            <Switch checked={s.rentalQualifiesQbi} onChange={v => set('rentalQualifiesQbi', v)} />} />
-          <V label="Special allowance available" value={money0(r.specialAllowance)}
-            note={r.specialAllowance > 0 ? 'Still partly intact at this income.'
-              : 'Fully phased out at this income — the toggle above is the only thing that unlocks the loss.'} />
-          <V cls="tot" label="Loss deducted this year" value={money0(r.rentalAllowed)}
-            unit={s.rentalNet < 0 ? pct(r.rentalAllowed / Math.max(1, -s.rentalNet) * 100) : undefined}
-            note={r.rentalSuspended > 0
-              ? <><b>{money0(r.rentalSuspended)} suspended</b> and carried forward. Not lost — it releases against passive income or when you sell.</>
-              : 'Everything is deductible this year.'} />
-          {r.eblDisallowed > 0 && (
-            <V cls="tot" label="Blocked by the excess business loss cap" value={money0(r.eblDisallowed)}
-              note={<>§461(l) stops a business loss at {money0(fed.excessBusinessLoss[s.status])} in one year. The rest becomes an operating loss carryforward.</>} />
+          {ca.provenance === 'carried' && (
+            <Note tone="warn" icon="warning" title={`California thresholds are the ${ca.scheduleYear} schedule`}>
+              The rates themselves are statute and have not moved. Only the thresholds index, at roughly 3% a year,
+              so the drift is worth a few hundred dollars to you, not a few thousand. Confirm at ftb.ca.gov before you file.
+            </Note>
           )}
-          </>}
-
-          <Band span={5} {...fold('adjust')} tag={money0(r.adjustments)}>Adjustments to income</Band>
-          {secOpen('adjust') && <>
-          <G>These come off before AGI, so they beat an itemized deduction of the same size — AGI drives the surtax thresholds, the SALT phase-down and the credit phase-outs all at once.</G>
-          <R label="401(k) elective deferral" amount={money0(s.deferral401k)}
-            note={`${money0(fed.elective401k)} limit for ${s.year}, plus ${money0(fed.catchUp401k)} at 50 and ${money0(fed.superCatchUp401k)} from 60 to 63.`}>
-            <Money value={s.deferral401k} onChange={v => set('deferral401k', v)} /></R>
-          <R label="Employer / solo 401(k) or SEP" amount={money0(s.employer401k)}
-            note="The employer side of a solo plan. On Schedule C income this is the largest single lever you control.">
-            <Money value={s.employer401k} onChange={v => set('employer401k', v)} /></R>
-          <R label="HSA contribution" amount={money0(s.hsa)}
-            note={`${money0(fed.hsaSelf)} self, ${money0(fed.hsaFamily)} family. California never conformed — it is federal-only.`}>
-            <Money value={s.hsa} onChange={v => set('hsa', v)} /></R>
-          <R label="Traditional IRA" amount={money0(s.tradIra)}
-            note={`${money0(fed.iraLimit)} limit, and deductible only if a workplace plan does not cover you at this income.`}>
-            <Money value={s.tradIra} onChange={v => set('tradIra', v)} /></R>
-          <R label="Self-employed health insurance" amount={money0(s.seHealthIns)}
-            note="Premiums for you and your family, limited to your net self-employment profit.">
-            <Money value={s.seHealthIns} onChange={v => set('seHealthIns', v)} /></R>
-          <V label="Half of self-employment tax" value={money0(r.halfSeTax)}
-            note="Automatic. The employer half of what a salaried person never sees." />
-          <R label="Other adjustments" amount={money0(s.otherAdjust)}
-            note="Student loan interest, educator expenses, alimony under a pre-2019 decree.">
-            <Money value={s.otherAdjust} onChange={v => set('otherAdjust', v)} /></R>
-          <V cls="tot" label="Total adjustments" value={money0(r.adjustments)}
-            note={<>Brings you from {money0(r.totalIncome)} of income to {money0(r.agi)} of AGI.</>} />
-          </>}
-
-          <Band span={5} {...fold('itemized')}
-            tag={`${money0(r.deductionUsed)} · ${r.deductionKind}`}>Deductions</Band>
-          {secOpen('itemized') && <>
-          <G>You take the larger of the two automatically. The standard deduction is {money0(fed.standardDeduction[s.status])} this year, so itemizing only pays once these clear it.</G>
-          <R label="Mortgage interest" amount={money0(s.mortgageInterest)}
-            note="On up to $750,000 of debt used to buy or improve the home. Not a rental's interest — that is already in the rental figure.">
-            <Money value={s.mortgageInterest} onChange={v => set('mortgageInterest', v)} /></R>
-          <R label="Property tax" amount={money0(s.propertyTax)}
-            note="Your residence. Rental property tax belongs in the rental figure, not here.">
-            <Money value={s.propertyTax} onChange={v => set('propertyTax', v)} /></R>
-          <R label="Charitable gifts" amount={money0(r.charitableAllowed)}
-            note={fed.charitableAgiFloor > 0
-              ? `From ${s.year} the first ${pct(fed.charitableAgiFloor * 100, 1)} of AGI does not count — ${money0(fed.charitableAgiFloor * r.agi)} of yours.`
-              : 'Cash gifts to public charities, up to 60% of AGI.'}>
-            <Money value={s.charitable} onChange={v => set('charitable', v)} /></R>
-          <R label="Medical expenses" amount={money0(r.medicalAllowed)}
-            note={<>Only the part above 7.5% of AGI counts — everything over the first {money0(0.075 * r.agi)}.</>}>
-            <Money value={s.medical} onChange={v => set('medical', v)} /></R>
-          <R label="Other itemized" amount={money0(s.otherItemized)}
-            note="Investment interest, casualty losses in a declared disaster.">
-            <Money value={s.otherItemized} onChange={v => set('otherItemized', v)} /></R>
-          <Sec span={5}>State and local tax — the cap and its phase-down</Sec>
-          <V label="State and local tax paid" value={money0(r.saltPaid)}
-            note={<>{money0(s.propertyTax)} property tax plus {money0(r.caTotal)} of California income tax.</>} />
-          <V label="Your cap this year" value={money0(r.saltCapUsed)}
-            note={r.saltCapUsed <= fed.saltFloor[s.status]
-              ? <><b>Phased all the way down.</b> The {money0(fed.saltCap[s.status])} cap sheds 30% of every dollar of income over {money0(fed.saltPhasedownFrom[s.status])} and floors at {money0(fed.saltFloor[s.status])}.</>
-              : <>Starts at {money0(fed.saltCap[s.status])} and sheds 30¢ per dollar of income over {money0(fed.saltPhasedownFrom[s.status])}.</>} />
-          <V label="Deductible" value={money0(r.saltAllowed)}
-            note={r.saltPaid > r.saltAllowed
-              ? <><b>{money0(r.saltPaid - r.saltAllowed)} of real tax gets no deduction.</b></>
-              : 'All of it counts.'} />
-          <Sec span={5}>Which deduction wins</Sec>
-          <V label="Standard deduction" value={money0(r.standardTotal)}
-            cls={r.deductionKind === 'standard' ? 'tot' : undefined}
-            note={fed.charitableNonItemizer[s.status] > 0
-              ? `${money0(fed.standardDeduction[s.status])} plus up to ${money0(fed.charitableNonItemizer[s.status])} of charitable gifts, which only people taking the standard may add.`
-              : 'A flat figure, no receipts.'} />
-          <V label="Itemized total" value={money0(r.itemizedTotal)}
-            cls={r.deductionKind === 'itemized' ? 'tot' : undefined}
-            note="Mortgage interest, capped state and local tax, charity and medical." />
-          <V cls="grand" label={`You take the ${r.deductionKind}`} value={money0(r.deductionUsed)}
-            note={<>{money0(Math.abs(r.itemizedTotal - r.standardTotal))} better than the alternative.</>} />
-          </>}
-
-          <Band span={5} {...fold('qbi')} tag={money0(r.qbiDeduction)}>Qualified business income</Band>
-          {secOpen('qbi') && <>
-          <G>A real estate agent or broker is <b>not</b> a specified service business — the regulations carve real property brokerage out of the trades that lose this deduction. Your commission keeps it where a lawyer&apos;s would not. The wage limit still applies.</G>
-          <V label="Qualified business income" value={money0(r.qbi)}
-            note="Schedule C profit less the self-employment tax deduction, health insurance and retirement contributions attributable to it." />
-          <R label="W-2 wages your business paid" amount={money0(s.qbiWages)}
-            note={`Above ${money0(fed.qbiThreshold[s.status])} of taxable income the deduction is capped at half of this. A sole proprietor with no payroll has zero here.`}>
-            <Money value={s.qbiWages} onChange={v => set('qbiWages', v)} /></R>
-          <R label="Business property basis" amount={money0(s.qbiProperty)}
-            note="Unadjusted basis of depreciable property. Feeds the alternative limit of 25% of wages plus 2.5% of this.">
-            <Money value={s.qbiProperty} onChange={v => set('qbiProperty', v)} /></R>
-          <V cls="tot" label="§199A deduction" value={money0(r.qbiDeduction)}
-            unit={r.qbi > 0 ? pct(r.qbiDeduction / r.qbi * 100) : undefined}
-            note={r.qbiWageLimited
-              ? <><b>Cut by the wage limit.</b> Paying yourself W-2 wages through an S corporation is the usual fix, and it has its own costs.</>
-              : 'Full 20%, or the taxable income ceiling, whichever binds first.'} />
-          <V label="California allows none of this" value={money0(0)}
-            note="The state never conformed to §199A, so your California taxable income is higher than your federal by this amount." />
-          </>}
-
-          </tbody>
-        </table></div>
-      </section>
-
-      {/* ============================================== TAB 2 — TAX SUMMARY */}
-      <section className={`pane${tab === 'summary' ? ' on' : ''}`}>
-        <Summary />
-
-        <div className="sheet"><table className="ss with-notes">
-          <colgroup><col className="c-lb" /><col className="c-n" /><col className="c-u" />
-            <col className="c-amt" /><col className="c-note" /></colgroup>
-          <tbody>
-          <Band span={5} tag={money0(r.federalTotal)}>Federal</Band>
-          <V label="Total income" value={money0(r.totalIncome)}
-            note="Everything taxable, after the rental rules decide what counts." />
-          <V label="Less adjustments" value={less(r.adjustments)}
-            note="Retirement, health savings, half the self-employment tax." />
-          <V cls="tot" label="Adjusted gross income" value={money0(r.agi)}
-            note="The figure every threshold and phase-out on this page measures against." />
-          <V label={`Less the ${r.deductionKind} deduction`} value={less(r.deductionUsed)}
-            note={r.deductionKind === 'itemized' ? 'Itemizing beat the standard deduction.' : 'The standard deduction beat itemizing.'} />
-          <V label="Less §199A" value={less(r.qbiDeduction)}
-            note="Twenty percent of qualified business income, subject to the wage and taxable income limits." />
-          <V cls="tot" label="Taxable income" value={money0(r.taxableIncome)}
-            note={<>{money0(r.ordinaryTaxable)} ordinary, {money0(r.preferentialIncome)} at gains rates.</>} />
-          <Sec span={5}>The tax itself</Sec>
-          <V label="Tax on ordinary income" value={money0(r.fedOrdinaryTax)}
-            note={<>Stepped through the ladder to {pct(r.fedBracketRate, 0)}.</>} />
-          {r.fed1250Tax > 0 && <V label="Depreciation recapture" value={money0(r.fed1250Tax)}
-            note="Ordinary rates, but stopped at 25%." />}
-          <V label="Tax on gains and qualified dividends" value={money0(r.fedGainsTax)}
-            note="Stacked on top of ordinary income, so its rate depends on everything below it." />
-          <V label="Less credits" value={less(r.credits)}
-            note={r.credits > 0 ? 'Child and dependent credits, after phase-out.' : 'Phased out at this income.'} />
-          <V label="Self-employment tax" value={money0(r.seTax)}
-            note="Both halves of Social Security and Medicare, which a salaried person splits with an employer." />
-          <V label="Net investment income tax" value={money0(r.niit)}
-            note={r.niit > 0
-              ? <>3.8% on {money0(Math.min(r.netInvestmentIncome, Math.max(0, r.agi - fed.niitFrom[s.status])))} — the lesser of investment income and income over {money0(fed.niitFrom[s.status])}.</>
-              : `Nothing — your income is under ${money0(fed.niitFrom[s.status])}.`} />
-          <V label="Additional Medicare tax" value={money0(r.addlMedicare)}
-            note={`0.9% on earnings over ${money0(fed.addlMedicareFrom[s.status])}.`} />
-          <V cls="grand" label="Total federal" value={money0(r.federalTotal)}
-            note={<>{pct(r.grossIncome > 0 ? r.federalTotal / r.grossIncome * 100 : 0)} of what you made.</>} />
-          </tbody>
-        </table></div>
-
-        <div className="sheet"><table className="ss with-notes">
-          <colgroup><col className="c-lb" /><col className="c-n" /><col className="c-u" />
-            <col className="c-amt" /><col className="c-note" /></colgroup>
-          <tbody>
-          <Band span={5} tag={money0(r.caTotal)}>California</Band>
-          <G>California taxes capital gains as ordinary income, allows no §199A deduction, never conformed to health savings accounts, and does not let you deduct its own tax. Every one of those makes the state base wider than the federal one.</G>
-          <V label="California AGI" value={money0(r.caAgi)}
-            note={r.caAgi !== r.agi ? <>{money0(r.caAgi - r.agi)} above federal, from the health savings account add-back.</> : 'Same as federal here.'} />
-          <V label={`Less the ${r.caDeductionKind} deduction`} value={less(r.caDeduction)}
-            note={r.caItemizedPhaseout > 0
-              ? <>Itemized deductions cut by {money0(r.caItemizedPhaseout)} — California kept the high-income phase-out the federal government dropped.</>
-              : `California's standard deduction is ${money0(r.caStandard)}, a fraction of the federal one.`} />
-          <V cls="tot" label="California taxable income" value={money0(r.caTaxableIncome)}
-            note={<>{money0(r.caTaxableIncome - r.taxableIncome)} more than the federal figure.</>} />
-          <V label="Tax on the ladder" value={money0(r.caBaseTax)}
-            note={<>Stepped from 1% to {pct(r.caBracketRate)}.</>} />
-          {r.caMentalHealth > 0 && <V label="Mental health services tax" value={money0(r.caMentalHealth)}
-            note="Proposition 63 — one point on everything over $1,000,000, and never indexed." />}
-          <V label="Less exemption credits" value={less(r.caExemptionCredits)}
-            note={r.caExemptionCredits > 0 ? 'A credit, not a deduction — it comes off the tax itself.' : 'Phased out at this income.'} />
-          <V cls="grand" label="Total California" value={money0(r.caTotal)}
-            note={<>{pct(r.grossIncome > 0 ? r.caTotal / r.grossIncome * 100 : 0)} of what you made.</>} />
-          <V label="State disability insurance" value={money0(r.caSdi)}
-            note="A payroll tax on wages, not income tax, so it sits outside the totals above. No wage ceiling since 2024." />
-          </tbody>
-        </table></div>
-
-        <div className="sheet"><table className="ss with-notes">
-          <colgroup><col className="c-lb" /><col className="c-n" /><col className="c-u" />
-            <col className="c-amt" /><col className="c-note" /></colgroup>
-          <tbody>
-          <Band span={5} tag={`${pct(r.effectiveRate)} effective · ${pct(r.marginalCombined)} marginal`}>Your rates</Band>
-          <G>The bracket you are in is not the rate your next dollar pays. The marginal figures here are <b>measured</b>: they add a thousand dollars of income and run the whole return again, so every phase-out you are standing in shows up.</G>
-          <V label="Effective rate on income" value={pct(r.effectiveRate)}
-            note={<>{money0(r.totalTax)} of tax on {money0(r.grossIncome)} earned.</>} />
-          <V label="Effective rate on AGI" value={pct(r.effectiveOnAgi)}
-            note="Higher, because retirement and health contributions came out first. Both are true; this is the one most people mean." />
-          <Sec span={5}>What the next dollar costs</Sec>
-          <V label="Federal bracket" value={pct(r.fedBracketRate, 0)} note="What a bracket table would tell you." />
-          <V label="Federal marginal, measured" value={pct(r.marginalFederal)}
-            note="Includes the surtaxes, the SALT phase-down and every credit phase-out you are inside." />
-          <V label="California bracket" value={pct(r.caBracketRate)} note="The state ladder at your taxable income." />
-          <V label="California marginal, measured" value={pct(r.marginalCa)} note="California has few phase-outs, so this rarely diverges." />
-          <V cls="grand" label="Combined marginal" value={pct(r.marginalCombined)}
-            note={<>Your brackets sum to {pct(r.fedBracketRate + r.caBracketRate)}. This is {marginalNote}.</>} />
-          <V label="Marginal on a long-term gain" value={pct(r.marginalGains)}
-            note="What one more dollar of capital gain would cost, all in. Model a whole sale on the next tab." />
-          </tbody>
-        </table></div>
-
-        <div className="sheet"><table className="ss with-notes">
-          <colgroup><col className="c-lb" /><col className="c-n" /><col className="c-u" />
-            <col className="c-amt" /><col className="c-note" /></colgroup>
-          <tbody>
-          <Band span={5} tag={money0(reps.saving)}>What professional status is worth</Band>
-          <G>Not a checkbox you tick because it helps. §469(c)(7) wants over 750 hours in real property trades, more than half of all your working time, and material participation in the rentals — documented contemporaneously, because it is among the most audited elections there is.</G>
-          <V label="Tax without the election" value={money0(reps.off.totalTax)}
-            note={reps.off.rentalSuspended > 0
-              ? <>{money0(reps.off.rentalSuspended)} of loss suspended and carried forward.</>
-              : 'Nothing suspended either way.'} />
-          <V label="Tax with the election" value={money0(reps.on.totalTax)}
-            note="The loss becomes ordinary and offsets everything else you earn." />
-          <V cls="grand" label="Worth to you this year" value={money0(reps.saving)}
-            note={reps.saving > 0
-              ? <>{pct(s.rentalNet < 0 ? reps.saving / Math.max(1, -s.rentalNet) * 100 : 0)} of the loss, which is roughly your combined marginal rate.</>
-              : 'Nothing on these numbers — there is no loss for it to free.'} />
-          {reps.on.eblDisallowed > 0 && (
-            <V label="Still blocked by §461(l)" value={money0(reps.on.eblDisallowed)}
-              note="Even with the election, a single year can only absorb so much. The rest carries forward." />
+          {r.rentalSuspended > 0 && !s.reps && (
+            <Note icon="home_work" title={`${money0(r.rentalSuspended)} of rental loss is suspended this year`}>
+              Qualifying as a real estate professional would free it and save {money0(reps.saving)}. The loss is not gone
+              either way: it carries forward until you have passive income or sell.
+            </Note>
           )}
-          </tbody>
-        </table></div>
-      </section>
 
-      {/* ============================================ TAB 3 — CAPITAL GAINS */}
-      <section className={`pane${tab === 'gains' ? ' on' : ''}`}>
-        <div className="sumry">
-          <div className="hero"><div className="k">Tax on this sale</div>
-            <div className="v">{money0(sale.totalDelta)}</div>
-            <div className="s">{pct(sale.effectiveOnGain)} of the gain</div></div>
-          <div><div className="k">You keep</div><div className="v pos">{money0(sale.netProceeds)}</div>
-            <div className="s">of {money0(sale.gainTotal)}</div></div>
-          <div><div className="k">Federal</div><div className="v">{money0(sale.fedDelta)}</div>
-            <div className="s">{money0(sale.niitDelta)} of it surtax</div></div>
-          <div><div className="k">California</div><div className="v">{money0(sale.caDelta)}</div>
-            <div className="s">taxed as ordinary income</div></div>
-          <div><div className="k">Next dollar</div><div className="v">{pct(sale.marginalNext)}</div>
-            <div className="s">if the gain were larger</div></div>
+          <div className="grid items-start gap-4 min-[1400px]:grid-cols-2">
+            <Panel dense title="Federal" tag={money0(r.federalTotal)} {...fold('fed')}>
+              <Line label="Total income" value={money0(r.totalIncome)} info="Everything taxable, after the rental loss rules." />
+              <Line label="Less adjustments" value={less(r.adjustments)} info="Retirement, health savings, half of SE tax." />
+              <Line strong label="Adjusted gross income" value={money0(r.agi)} info="The number every threshold and phase-out measures against." />
+              <Line label={`Less the ${r.deductionKind} deduction`} value={less(r.deductionUsed)}
+                info={r.deductionKind === 'itemized' ? 'Itemizing beat the standard deduction.' : 'The standard deduction beat itemizing.'} more={U.itemize} />
+              <Line label="Less §199A" value={less(r.qbiDeduction)} info="20% of qualified business income, within the wage and income limits." more={U.qbi} />
+              <Line strong label="Taxable income" value={money0(r.taxableIncome)}
+                hint={`${money0(r.ordinaryTaxable)} ordinary · ${money0(r.preferentialIncome)} at gains rates`} />
+              <SectionLabel>The tax itself</SectionLabel>
+              <Line label="Tax on ordinary income" value={money0(r.fedOrdinaryTax)} info={<>Through the brackets, up to {pct(r.fedBracketRate, 0)}.</>} more={U.brackets} />
+              {r.fed1250Tax > 0 && <Line label="Depreciation recapture" value={money0(r.fed1250Tax)} info="Ordinary rates, capped at 25%." more={U.gains} />}
+              <Line label="Tax on gains and qualified dividends" value={money0(r.fedGainsTax)}
+                info="Stacked on top of ordinary income, at 0, 15 or 20%." more={U.gains} />
+              <Line label="Less credits" value={less(r.credits)}
+                info={r.credits > 0 ? 'Child and dependent credits, after phase-out.' : 'Phased out at this income.'} more={U.ctc} />
+              <Line label="Self-employment tax" value={money0(r.seTax)}
+                info="Both halves of Social Security and Medicare." more={U.seTax} />
+              <Line label="Net investment income tax" value={money0(r.niit)}
+                info={r.niit > 0
+                  ? <>3.8% on {money0(Math.min(r.netInvestmentIncome, Math.max(0, r.agi - fed.niitFrom[st])))} of investment income.</>
+                  : `None. Income is under ${money0(fed.niitFrom[st])}.`} more={U.niit} />
+              <Line label="Additional Medicare tax" value={money0(r.addlMedicare)} info={`0.9% on earnings over ${money0(fed.addlMedicareFrom[st])}.`} more={U.addlMed} />
+              <Line total label="Total federal" value={money0(r.federalTotal)} hint={`${share(r.federalTotal)} of what you made`} />
+            </Panel>
+
+            <div className="flex min-w-0 flex-col gap-4">
+              <Panel dense title="California" tag={money0(r.caTotal)} {...fold('ca')}>
+                <Line label="California AGI" value={money0(r.caAgi)}
+                  info={r.caAgi !== r.agi ? <>{money0(r.caAgi - r.agi)} above federal: California adds back the HSA{r.caRentalAllowed < r.rentalAllowed ? ` and does not let professional status free the rental loss (${money0(r.rentalAllowed - r.caRentalAllowed)})` : ''}.</> : 'Same as federal here.'} more={U.caDed} />
+                <Line label={`Less the ${r.caDeductionKind} deduction`} value={less(r.caDeduction)}
+                  info={r.caItemizedPhaseout > 0
+                    ? <>Itemized deductions cut by {money0(r.caItemizedPhaseout)} at high income.</>
+                    : `California's standard deduction is ${money0(r.caStandard)}.`} more={U.caDed} />
+                <Line strong label="California taxable income" value={money0(r.caTaxableIncome)}
+                  hint={`${money0(r.caTaxableIncome - r.taxableIncome)} more than federal`}
+                  info="Wider than federal: gains taxed as ordinary income, no §199A, no HSA, no deduction for state tax." more={U.caGains} />
+                <Line label="Tax on the ladder" value={money0(r.caBaseTax)} info={<>Through California's brackets, 1% to {pct(r.caBracketRate)}.</>} more={U.caRates} />
+                {r.caMentalHealth > 0 && <Line label="Mental health services tax" value={money0(r.caMentalHealth)}
+                  info="An extra 1% on taxable income over $1,000,000." more={U.caRates} />}
+                <Line label="Less exemption credits" value={less(r.caExemptionCredits)}
+                  info={r.caExemptionCredits > 0 ? 'Comes off the tax itself.' : 'Phased out at this income.'} more={U.caCredits} />
+                <Line total label="Total California" value={money0(r.caTotal)} hint={`${share(r.caTotal)} of what you made`} />
+                <Line label="State disability insurance" value={money0(r.caSdi)}
+                  info="A payroll tax on wages, outside the totals above." more={U.sdi} />
+              </Panel>
+            </div>
+          </div>
         </div>
+      </div>
 
-        <div className="sheet one"><table className="ss with-notes">
-          <colgroup><col className="c-lb" /><col className="c-n" /><col className="c-u" />
-            <col className="c-amt" /><col className="c-note" /></colgroup>
-          <tbody>
-          <Band span={5} tag={money0(sale.gainTotal)}>The sale</Band>
-          <G>A gain has no tax of its own — it has the tax it <b>adds</b>. This runs your whole return with and without it, which is why the answer moves when your other income does.</G>
-          <R label="Long-term gain" amount={money0(gLong)}
-            note="Sale price less basis, held over a year. Basis is what you paid plus improvements, less depreciation taken.">
-            <Money value={gLong} onChange={setGLong} /></R>
-          <R label="Short-term gain" amount={money0(gShort)}
-            note="Held a year or less. Ordinary rates — a flip is usually here, and also owes self-employment tax.">
-            <Money value={gShort} onChange={setGShort} /></R>
-          <R label="Depreciation recapture" amount={money0(gRecapture)}
-            note="Unrecaptured §1250. Every year of rental depreciation comes back at up to 25%, whether or not you claimed it.">
-            <Money value={gRecapture} onChange={setGRecapture} /></R>
-          <R label="§121 primary residence exclusion" amount={less(Math.min(gExclusion, gLong))}
-            note="$250,000 single, $500,000 married, if you lived there two of the last five years. Nothing for a rental you never occupied.">
-            <Money value={gExclusion} onChange={setGExclusion} /></R>
-          <V cls="tot" label="Taxable gain" value={money0(sale.gainTotal)}
-            note="What actually lands on the return, stacked on top of everything on the first tab." />
-          </tbody>
-        </table></div>
-
-        <div className="sheet"><table className="ss with-notes">
-          <colgroup><col className="c-lb" /><col className="c-n" /><col className="c-u" />
-            <col className="c-amt" /><col className="c-note" /></colgroup>
-          <tbody>
-          <Band span={5} tag={money0(sale.totalDelta)}>What it costs</Band>
-          <V label="Your tax without the sale" value={money0(sale.without.totalTax)}
-            note={<>Effective {pct(sale.without.effectiveRate)} on {money0(sale.without.grossIncome)}.</>} />
-          <V label="Your tax with it" value={money0(sale.with.totalTax)}
-            note={<>Effective {pct(sale.with.effectiveRate)}. The sale also pushes your other income into worse territory.</>} />
-          <V cls="tot" label="Federal share" value={money0(sale.fedDelta)}
-            note={<>Includes {money0(sale.niitDelta)} of investment surtax, which the sale can trigger on interest and dividends that escaped it before.</>} />
-          <V cls="tot" label="California share" value={money0(sale.caDelta)}
-            note="No preferential rate at all — the state treats a long-term gain exactly like salary." />
-          <V cls="grand" label="Total tax on the sale" value={money0(sale.totalDelta)}
-            note={<><b>{pct(sale.effectiveOnGain)} of the gain.</b> You keep {money0(sale.netProceeds)}.</>} />
-          {sale.with.saltCapUsed < sale.without.saltCapUsed && (
-            <V label="Of that, lost SALT deduction" value={money0(sale.without.saltAllowed - sale.with.saltAllowed)}
-              note={<><b>Already inside the federal share above.</b> Income over {money0(fed.saltPhasedownFrom[s.status])} sheds 30¢ of cap per dollar, so a big gain quietly costs more than its own rate.</>} />
-          )}
-          <V label="If you exchanged instead" value={money0(0)}
-            note="A §1031 exchange into another investment property defers all of this. It does not erase it — basis carries over, and California claws back deferred gain if you later sell out of state." />
-          </tbody>
-        </table></div>
-
-        <Ladder brackets={fed.capGains[s.status]} taxable={sale.with.taxableIncome}
-          label="Federal long-term gains ladder"
-          note={<>These steps are measured against your <b>whole</b> taxable income, not the gain alone. That is why the same sale costs different people different amounts.</>} />
-      </section>
-
-      {/* ================================================= TAB 4 — BRACKETS */}
-      <section className={`pane${tab === 'brackets' ? ' on' : ''}`}>
-        <div className="notice">
-          <div><b>{s.year} tables · {FILING_STATUSES.find(f => f.id === s.status)!.label}</b>
-            Federal from {fed.source}. California from {ca.source}. Entered {fed.verifiedOn}.
-            Rates change by act of Congress and by ballot measure, and thresholds index every year —
-            check both before you file rather than before you plan.</div>
-        </div>
-
-        <Ladder brackets={fed.ordinary[s.status]} taxable={r.taxableIncome}
-          label="Federal ordinary income"
-          note="Wages, self-employment profit, interest, short-term gains, rental income. Each step taxes only the slice inside it." />
-
-        <Ladder brackets={fed.capGains[s.status]} taxable={r.taxableIncome}
-          label="Federal long-term gains and qualified dividends"
-          note="Stacked above ordinary income, so where you land depends on your whole return, not just the gain." />
-
-        <Ladder brackets={ca.brackets[s.status]} taxable={r.caTaxableIncome}
-          label="California — all income, gains included"
-          note="No preferential rate for capital gains. The 1% mental health surcharge over $1,000,000 sits on top of the ladder and is not shown as a step." />
-
-        <div className="sheet"><table className="ss with-notes">
-          <colgroup><col className="c-lb" /><col className="c-n" /><col className="c-u" />
-            <col className="c-amt" /><col className="c-note" /></colgroup>
-          <tbody>
-          <Band span={5} tag={`${s.year} · ${statusLabel}`}>Thresholds and limits</Band>
-          <Sec span={5}>Where extra tax starts</Sec>
-          <V label="Net investment income tax" value={money0(fed.niitFrom[s.status])}
-            note="3.8% above this, on the lesser of investment income and the excess. Never indexed since 2013, so it catches more people every year." />
-          <V label="Additional Medicare tax" value={money0(fed.addlMedicareFrom[s.status])}
-            note="0.9% on earnings above it. Also never indexed." />
-          <V label="California mental health surcharge" value={money0(ca.mentalHealthFrom)}
-            note="One point on taxable income above a million. Fixed by Proposition 63." />
-          <Sec span={5}>Where deductions start disappearing</Sec>
-          <V label="State and local tax cap" value={money0(fed.saltCap[s.status])}
-            note={<>Sheds 30% of income over {money0(fed.saltPhasedownFrom[s.status])}, flooring at {money0(fed.saltFloor[s.status])}. Reverts to {money0(10000)} in 2030 unless Congress acts again.</>} />
-          <V label="§199A threshold" value={money0(fed.qbiThreshold[s.status])}
-            note={<>Above this the wage limit phases in over {money0(fed.qbiPhaseIn[s.status])} of income.</>} />
-          <V label="Child credit phase-out" value={money0(fed.creditPhaseoutFrom[s.status])}
-            note={<>{money0(fed.childCredit)} per child, losing $50 per $1,000 of income above this.</>} />
-          <V label="Passive loss allowance" value={money0(s.status === 'mfs' ? 12500 : 25000)}
-            note={<>Phases out from {money0(s.status === 'mfs' ? 50000 : 100000)} and is gone {money0(s.status === 'mfs' ? 75000 : 150000)} later. Professional status is the only way past it.</>} />
-          <V label="Excess business loss cap" value={money0(fed.excessBusinessLoss[s.status])}
-            note="The most a business loss can shelter in one year. The rest becomes a carryforward." />
-          <Sec span={5}>What you can put away</Sec>
-          <V label="401(k) elective deferral" value={money0(fed.elective401k)}
-            note={<>Plus {money0(fed.catchUp401k)} from 50, and {money0(fed.superCatchUp401k)} instead from 60 through 63.</>} />
-          <V label="IRA" value={money0(fed.iraLimit)} note={<>Plus {money0(fed.iraCatchUp)} from 50.</>} />
-          <V label="Health savings account" value={money0(fed.hsaFamily)}
-            note={<>{money0(fed.hsaSelf)} for self-only coverage, plus {money0(fed.hsaCatchUp)} from 55. California taxes all of it.</>} />
-          <V label="Social Security wage base" value={money0(fed.ssWageBase)}
-            note="Earnings above it pay Medicare but no Social Security." />
-          <Sec span={5}>Standard deductions</Sec>
-          <V label="Federal" value={money0(fed.standardDeduction[s.status])}
-            note={fed.charitableNonItemizer[s.status] > 0
-              ? <>Plus up to {money0(fed.charitableNonItemizer[s.status])} of charitable gifts, new for people who do not itemize.</>
-              : 'Flat, no receipts required.'} />
-          <V label="California" value={money0(ca.standardDeduction[s.status])}
-            note="A fraction of the federal figure, which is why Californians itemize at incomes where other states do not." />
-          </tbody>
-        </table></div>
-      </section>
-
-      <p className="footnote">
+      <p className="mt-4 text-[0.8125rem] leading-snug text-muted-foreground">
         A planning model, not a tax return. It does not compute the alternative minimum tax, which
         can matter between $500,000 and $1,000,000 of income now that the state and local cap is
-        larger again — ask your CPA whether it reaches you. It also leaves out refundable credits,
+        larger again. Ask your CPA whether it reaches you. It also leaves out refundable credits,
         the qualified small business stock exclusion, foreign income, education credits and
         estimated payment penalties. State income tax deducted federally is this year&apos;s
         California liability rather than what you actually paid in cash during the year.
         Verify every figure before filing or before making a decision worth more than it.
       </p>
+      {/* ============================================ POPUPS */}
+      {modalEl('reps', 'Real estate professional status', 'What the election is worth on this year\u2019s return.', 'max-w-md', <>
+        <div className={cn('rounded-lg px-4 py-3', reps.saving > 0 ? 'bg-success-soft' : 'bg-page')}>
+          <div className="text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">{reps.saving > 0 ? 'Saves you' : 'Saves you nothing'}</div>
+          <div className={cn('text-[2rem] font-extrabold leading-tight tracking-[-0.02em] tabular-nums', reps.saving > 0 ? 'text-success' : 'text-ink-strong')}>{money0(reps.saving)}</div>
+          {reps.saving <= 0 && <div className="text-[0.8125rem] text-muted-foreground">There is no rental loss for it to free.</div>}
+        </div>
+        <table className="mt-3 w-full text-sm tabular-nums">
+          <thead>
+            <tr className="border-b border-line">
+              <th scope="col"><span className="sr-only">Figure</span></th>
+              <th scope="col" className={cmpTh}>Without</th>
+              <th scope="col" className={cmpTh}>With</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cmpRow('Rental loss deducted', reps.off.rentalAllowed, reps.on.rentalAllowed)}
+            {cmpRow('Federal tax', reps.off.federalTotal, reps.on.federalTotal)}
+            {cmpRow('California tax', reps.off.caTotal, reps.on.caTotal)}
+          </tbody>
+        </table>
+        <p className="mt-3 text-[0.8125rem] leading-snug text-muted-foreground">
+          California ignores the election. <a href={U.caPassive} target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">ftb.ca.gov</a>
+          <span className="mt-1 block">To qualify: 750+ hours in real property work and more than half your working time. <a href={U.reps} target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">irs.gov</a></span>
+        </p>
+      </>)}
+      {modalEl('sale', 'Sell an asset', 'What a sale adds to your tax. It sits on top of your return and is not added to the figures on the page.', 'max-w-3xl', <>
+        <div className="grid items-start gap-x-8 gap-y-4 md:grid-cols-[280px_minmax(0,1fr)]">
+          <div>
+            <SectionLabel>The sale</SectionLabel>
+            <Field label="Long-term gain" info="Sale price less basis, held over a year." more={U.gains}>
+              {$(gLong, setGLong)}</Field>
+            <Field label="Short-term gain" info="Held a year or less. Ordinary rates. A flip usually lands here." more={U.gains}>
+              {$(gShort, setGShort)}</Field>
+            <Field label="Depreciation recapture" info="Rental depreciation, taxed at up to 25% on sale." more={U.gains}>
+              {$(gRecapture, setGRecapture)}</Field>
+            <Field label="§121 home exclusion" info="$250,000 single, $500,000 married, if you lived there 2 of the last 5 years." more={U.home}>
+              {$(gExclusion, setGExclusion)}</Field>
+            <Line total label="Taxable gain" value={money0(sale.gainTotal)}
+              info="The gain that lands on your return, on top of your other income." more={U.gains} />
+          </div>
+
+          <div className="min-w-0">
+            {/* the answer: the total on the left, who gets it on the right */}
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-lg bg-page px-4 py-3">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">Total tax on this sale</div>
+                <div className="text-[1.75rem] font-extrabold leading-tight tracking-[-0.015em] tabular-nums text-ink-strong">{money0(sale.totalDelta)}</div>
+                <div className="text-[0.8125rem] tabular-nums text-muted-foreground">
+                  {pct(sale.effectiveOnGain)} of the gain · you keep <b className="text-success">{money0(sale.netProceeds)}</b>
+                </div>
+              </div>
+              <dl className="grid grid-cols-[auto_auto] items-baseline gap-x-4 gap-y-1 text-sm tabular-nums">
+                <dt className="text-[#3a4352]">Federal</dt><dd className="text-right text-base font-extrabold text-ink-strong">{money0(sale.fedDelta)}</dd>
+                <dt className="text-[#3a4352]">California</dt><dd className="text-right text-base font-extrabold text-ink-strong">{money0(sale.caDelta)}</dd>
+              </dl>
+            </div>
+            {/* a banner per ladder, only when the sale crosses into a new bracket */}
+            {bumps.map(x => (
+              <p key={x.who} role="status" className="mb-2 flex items-start gap-2 rounded-md bg-warning-soft px-3 py-2 text-sm leading-snug text-ink-strong">
+                <Icon name="trending_up" size={18} className="mt-px shrink-0 text-warning" />
+                <span>Pushed into the <b>{x.rate} {x.who}</b> bracket, <b className="tabular-nums">{money0(x.over)}</b> past the {money0(x.line)} line.</span>
+              </p>
+            ))}
+
+            <section className="rounded-lg border border-line px-3 pb-1 pt-2.5">
+              <h3 className="border-b border-line pb-1.5 text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">Federal</h3>
+              {saleRows.map(x => Math.abs(x.v) >= 1 && (
+                <Line key={x.label} label={x.label} value={money0(x.v)} info={x.info} more={x.more} />
+              ))}
+              <h3 className="mt-2 border-b border-line pb-1.5 text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">California</h3>
+              <Line label="Taxed like wages" value={`${pct(sale.gainTotal > 0 ? sale.caDelta / sale.gainTotal * 100 : 0)} of the gain`}
+                info="California has no lower rate for long-term gains. The whole gain is taxed at its regular brackets." more={U.caGains} />
+            </section>
+
+            <p className="mt-3 text-[0.8125rem] leading-snug text-muted-foreground">
+              A §1031 exchange into another investment property defers this tax.{' '}
+              <a href={U.x1031} target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">irs.gov</a>
+            </p>
+          </div>
+        </div>
+      </>)}
+      {modalEl('brackets', 'Brackets', `${s.year} tables, ${statusLabel.label.toLowerCase()}. The highlighted step is where you stand.`, 'max-w-4xl', <>
+            <div className="mb-4 grid gap-3 sm:grid-cols-3">
+              <BracketSpot brackets={fed.ordinary[st]} taxable={r.taxableIncome} label="Federal" />
+              <BracketSpot brackets={ca.brackets[st]} taxable={r.caTaxableIncome} label="California" />
+              <BracketSpot brackets={fed.capGains[st]} taxable={r.taxableIncome} label="Long-term gains" />
+            </div>
+            <div className="grid items-start gap-x-4 md:grid-cols-2">
+              <div>
+                <Ladder brackets={fed.ordinary[st]} taxable={r.taxableIncome} label="Federal ordinary income"
+                  info="Wages, business profit, interest, short-term gains, rental income." more={U.brackets} />
+                <Ladder brackets={fed.capGains[st]} taxable={r.taxableIncome} label="Federal long-term gains and qualified dividends"
+                  info="Stacked above ordinary income, so the rate depends on your whole return." more={U.gains} />
+              </div>
+              <Ladder brackets={ca.brackets[st]} taxable={r.caTaxableIncome} label="California, all income, gains included"
+                info="No lower rate for gains. The 1% surcharge over $1,000,000 is not shown." more={U.caRates} />
+            </div>
+            <p className="text-[0.8125rem] leading-snug text-muted-foreground">
+              {statusLabel.label}. Federal from {fed.source}. California from {ca.source}. Entered {fed.verifiedOn}.
+              Rates change by act of Congress and by ballot measure, and thresholds index every year, so check both before you file.
+            </p>
+      </>)}
+      {modalEl('limits', 'Thresholds and limits', `${s.year}, ${statusLabel.label.toLowerCase()}.`, 'max-w-4xl', <>
+            <div className="grid gap-x-8 md:grid-cols-2">
+              <div>
+                <SectionLabel>Where extra tax starts</SectionLabel>
+                <Line label="Net investment income tax" value={money0(fed.niitFrom[st])}
+                  info="3.8% on investment income above this. Not indexed for inflation." more={U.niit} />
+                <Line label="Additional Medicare tax" value={money0(fed.addlMedicareFrom[st])} info="0.9% on earnings above this. Not indexed." more={U.addlMed} />
+                <Line label="California mental health surcharge" value={money0(ca.mentalHealthFrom)}
+                  info="1% on taxable income above this." more={U.caRates} />
+                <SectionLabel>Where deductions start disappearing</SectionLabel>
+                <Line label="State and local tax cap" value={money0(fed.saltCap[st])}
+                  info={<>Shrinks 30¢ per dollar of income over {money0(fed.saltPhasedownFrom[st])}, down to {money0(fed.saltFloor[st])}.</>} more={U.salt} />
+                <Line label="§199A threshold" value={money0(fed.qbiThreshold[st])}
+                  info={<>Above this, the wage limit phases in over {money0(fed.qbiPhaseIn[st])}.</>} more={U.qbi} />
+                <Line label="Child credit phase-out" value={money0(fed.creditPhaseoutFrom[st])}
+                  info={<>{money0(fed.childCredit)} per child, less $50 per $1,000 of income above this.</>} more={U.ctc} />
+                <Line label="Passive loss allowance" value={money0(st === 'mfs' ? 12500 : 25000)}
+                  info={<>Phases out from {money0(st === 'mfs' ? 50000 : 100000)} of income, gone at {money0(st === 'mfs' ? 75000 : 150000)}.</>} more={U.passive} />
+                <Line label="Excess business loss cap" value={money0(fed.excessBusinessLoss[st])}
+                  info="The most business loss one year can absorb. The rest carries forward." more={U.ebl} />
+              </div>
+              <div>
+                <SectionLabel>What you can put away</SectionLabel>
+                <Line label="401(k) elective deferral" value={money0(fed.elective401k)}
+                  info={<>Plus {money0(fed.catchUp401k)} from age 50, or {money0(fed.superCatchUp401k)} at 60 to 63.</>} more={U.k401} />
+                <Line label="IRA" value={money0(fed.iraLimit)} info={<>Plus {money0(fed.iraCatchUp)} from age 50.</>} more={U.iraLimits} />
+                <Line label="Health savings account" value={money0(fed.hsaFamily)}
+                  info={<>Family coverage. {money0(fed.hsaSelf)} self-only, plus {money0(fed.hsaCatchUp)} from 55.</>} more={U.hsa} />
+                <Line label="Social Security wage base" value={money0(fed.ssWageBase)} info="Earnings above it pay Medicare but not Social Security." more={U.payroll} />
+                <SectionLabel>Standard deductions</SectionLabel>
+                <Line label="Federal" value={money0(fed.standardDeduction[st])}
+                  info={fed.charitableNonItemizer[st] > 0
+                    ? <>Plus up to {money0(fed.charitableNonItemizer[st])} of charitable gifts if you do not itemize.</>
+                    : 'A flat amount, no receipts.'} more={U.std} />
+                <Line label="California" value={money0(ca.standardDeduction[st])}
+                  info="Much smaller than federal, so Californians itemize sooner." more={U.caDed} />
+              </div>
+            </div>
+      </>)}
     </>
   );
 }

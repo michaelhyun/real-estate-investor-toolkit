@@ -1,19 +1,19 @@
 'use client';
 
-/* Bay Area Flip Analyzer — four tabs over one FlipState, laid out as sheets.
+/* Bay Area Flip Analyzer. One page: what you type on the left, what it means on
+   the right, the same shape as the Rental Analyzer.
 
-   The reading task here is scanning columns of figures, not filling in a form,
-   so every group is a dense ruled table rather than a stack of airy input rows.
-   Tab 1 is the only one you type into; tabs 2 and 3 are pure derivations of it.
-   Tab 4 writes back into the rehab block on request and flags divergence when
-   you later override it by hand.
+   Built to be quick to fill in. The first three panels are the deal itself and
+   open by default; acquisition, holding and selling costs come pre-filled (and
+   re-filled by the city preset), so they start shut and show their totals.
+   Each row's guidance sits behind a small info icon rather than on the page.
 
-   Two storage keys, deliberately:
-   · flipDeals.v1   — saved deals, synced per-account under kind 'flip'
-   · flipCatalog.v1 — the rehab price catalog, SHARED across every deal, so a
-                      corrected price propagates instead of needing re-fixing.
-   A deal owns what is specific to it (what is checked, quantity overrides) and
-   never a copy of the prices. */
+   The Scope of Work checklist is off the page for now. Its data (what is
+   checked, quantities, room sizes, the shared price catalog) still round-trips
+   through save and load untouched, so nothing saved earlier is lost.
+
+   Storage: flipDeals.v1 holds saved deals, synced per account under kind
+   'flip'; flipCalc.draft.v1 is the working draft. */
 
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -21,31 +21,32 @@ import {
   defaultFlipState, computeFlip, solveMAO, seventyRule, buildSensitivity,
   verdictFor, SELLER_PROVIDED, SCENARIO_KEYS, ACQ_ITEMS, HOLD_ITEMS, SELL_FLAT_ITEMS,
   citiesByCounty, findCity, listingLinks,
-  buildSpaces, computeSow, applyLevel, taskKey, taskQty, taskCost, priceKey, DEF_BY_KIND, LEVEL_LABELS,
-  money, money0, pct, parseNum,
+  money, money0, pct,
   type FlipState, type ScenarioKey, type CostLine, type FlipResult,
-  type PropertyShape, type SpaceInstance, type SowTask, type Level,
 } from '@reit/core';
-import { NumInput, Switch, UnitToggle, loadJSON, saveJSON, openReportWindow } from '../../components/ui';
-import { Band, Sec, G, R, V, Money, Num, Count } from '../../components/sheet';
-import { buildFlipReport, buildScopeOfWork } from '../../components/flipReport';
+import { loadJSON, saveJSON, openReportWindow } from '../../components/ui';
+import { Panel, Field, Line, SectionLabel, NumberField, Segmented, Stat, Verdict, Note, Toggle, InfoTip, CONTROL_W } from '../../components/calc';
+import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { buildFlipReport } from '../../components/flipReport';
 import { AddressInput } from '../../components/AddressInput';
 import { toast } from '../../components/toast';
 import { Icon } from '../../components/Icon';
 import { useAuth } from '../../components/auth';
 import { dealStore, mergeDeals } from '../../lib/dealsync';
+import { lookupProperty } from '../../lib/rentcast';
+import { cn } from '@/lib/utils';
 
 const STORE_KEY = 'flipDeals.v1';
 const DRAFT_KEY = 'flipCalc.draft.v1';
-const CATALOG_KEY = 'flipCatalog.v1';
 
 /* the account-side store for this tool — 'flip' is named once, here */
 const cloud = dealStore<FlipState>('flip');
 
-type TabId = 'assumptions' | 'model' | 'sow';
-
-/* the foldable sections of the assumptions sheet, in the order they appear */
-const ASSUM_SECS = ['prop', 'value', 'rehab', 'time', 'acq', 'hold', 'sell', 'fin'];
+/* Panels that start shut: their rows come pre-filled, so most deals never
+   need them opened. A panel absent from the map follows this default. */
+const SHUT_BY_DEFAULT: Record<string, boolean> = { acq: true, hold: true, sell: true };
 
 /* ------------------------------------------------------------ normalization */
 
@@ -128,19 +129,17 @@ const holdLabel = (months: number) =>
 
 /* ================================================================== the page */
 
+type Tone = 'ok' | 'warn' | 'bad';
+const TONE: Record<Tone, string> = { ok: 'text-success', warn: 'text-warning', bad: 'text-destructive' };
+const say = (tone: Tone, text: string) => <span className={cn('font-semibold', TONE[tone])}>{text}</span>;
+
 export default function FlipPage() {
   const [s, setS] = useState<FlipState>(defaultFlipState);
-  const [catalogPrices, setCatalogPrices] = useState<Record<string, number>>({});
-  const [tab, setTab] = useState<TabId>('assumptions');
-  const [openSecs, setOpenSecs] = useState<Record<string, boolean>>({ 'kitchen-1': true });
-  /* Assumption sections fold shut. Stored as the exception — a section absent
-     from this map is open — so the page opens fully expanded. */
-  const [shutSecs, setShutSecs] = useState<Record<string, boolean>>({});
+  const [shut, setShut] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [savedDeals, setSavedDeals] = useState<FlipState[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
-  const menuWrapRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const syncedFor = useRef<string | null>(null);
 
@@ -150,19 +149,18 @@ export default function FlipPage() {
   const setMap = (group: 'acq' | 'hold' | 'sell', id: string, v: number) =>
     setS(p => ({ ...p, [group]: { ...p[group], [id]: v } }));
   const setArv = (k: ScenarioKey, v: number) => setS(p => ({ ...p, arv: { ...p.arv, [k]: v } }));
-  const setRehab = (k: ScenarioKey, v: number) => setS(p => ({ ...p, rehab: { ...p.rehab, [k]: v } }));
+  const setRehab = (k: ScenarioKey, v: number) =>
+    setS(p => ({ ...p, rehabSource: 'manual', rehab: { ...p.rehab, [k]: v } }));
 
   /* ---------- hydrate ---------- */
   useEffect(() => {
     const draft = loadJSON<any>(DRAFT_KEY);
     if (draft && isFinite(draft.price)) setS(normalizeFlip(draft));
     setSavedDeals((loadJSON<any[]>(STORE_KEY) || []).map(normalizeFlip));
-    setCatalogPrices(loadJSON<Record<string, number>>(CATALOG_KEY) || {});
     setHydrated(true);
   }, []);
 
   useEffect(() => { if (hydrated) saveJSON(DRAFT_KEY, s); }, [s, hydrated]);
-  useEffect(() => { if (hydrated) saveJSON(CATALOG_KEY, catalogPrices); }, [catalogPrices, hydrated]);
 
   /* ---------- cloud sync — same rule as the rental analyzer ---------- */
   useEffect(() => { if (!user) syncedFor.current = null; }, [user]);
@@ -186,117 +184,84 @@ export default function FlipPage() {
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [hydrated, user]);
 
-  useEffect(() => {
-    const onDoc = (ev: MouseEvent) => {
-      if (!menuWrapRef.current?.contains(ev.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener('click', onDoc);
-    return () => document.removeEventListener('click', onDoc);
-  }, []);
-
   /* ---------- derived ---------- */
   const city = findCity(s.citySlug);
   const sqft = s.prop.sqft;
-  const propShape: PropertyShape = useMemo(() => ({
-    sqft: s.prop.sqft, beds: s.prop.beds, baths: s.prop.baths,
-    halfBaths: s.prop.halfBaths, stories: s.prop.stories, garageBays: s.prop.garageBays,
-  }), [s.prop]);
-
-  /* rooms come from the property; their areas seed from it and stay editable */
-  const spaces: SpaceInstance[] = useMemo(
-    () => buildSpaces(propShape).map(sp => ({ ...sp, sqft: s.spaceSqft[sp.id] ?? sp.sqft })),
-    [propShape, s.spaceSqft]);
-
-  const sow = useMemo(
-    () => computeSow(spaces, s.checked, s.qty, catalogPrices, propShape),
-    [spaces, s.checked, s.qty, catalogPrices, propShape]);
-  const allOpen = spaces.length > 0 && spaces.every(sp => openSecs[sp.id]);
-
-  const secOpen = (id: string) => !shutSecs[id];
-  const fold = (id: string) => ({
-    open: secOpen(id),
-    onToggle: () => setShutSecs(p => ({ ...p, [id]: !p[id] })),
-  });
-  const allShut = ASSUM_SECS.every(id => shutSecs[id]);
-
   const links = useMemo(() => listingLinks(s.prop.address), [s.prop.address]);
 
   const rBase = useMemo(() => computeFlip(s, 'base'), [s]);
-  /* rehab is one budget now, so the P&L compares the three ARV scenarios */
   const cols = useMemo(() => SCENARIO_KEYS.map(k => computeFlip(s, k)), [s]);
   const sens = useMemo(() => buildSensitivity(s, 7), [s]);
   const mao = useMemo(() => solveMAO(s), [s]);
+  const seventy = seventyRule(s);
   const verdict = verdictFor(rBase, s);
 
-  /* Screening benchmarks. These are rules of thumb, not rules — they exist so a
-     number on screen carries a sense of whether it is normal for the Bay Area. */
-  const band = (v: number, good: number, ok: number, labels: [string, string, string]) =>
-    v >= good ? <span className="ok">{labels[0]}</span>
-    : v >= ok ? <span className="warn">{labels[1]}</span>
-    : <span className="bad">{labels[2]}</span>;
-  const spreadVerdict = band(rBase.grossSpread, 25, 20,
-    ['comfortably in range', 'thin, but workable', 'too thin for the risk']);
-  const rehabVerdict = rBase.rehabPsf <= 160
-    ? <span className="ok">cosmetic territory</span>
-    : rBase.rehabPsf <= 350
-      ? <span className="ok">gut territory</span>
-      : <span className="warn">above a normal gut — check the scope</span>;
+  /* Screening benchmarks. Rules of thumb, not rules: they give a number on
+     screen a sense of whether it is normal for the Bay Area. */
+  const spreadVerdict = rBase.grossSpread >= 25 ? say('ok', 'comfortably in range')
+    : rBase.grossSpread >= 20 ? say('warn', 'thin, but workable') : say('bad', 'too thin for the risk');
+  const rehabVerdict = rBase.rehabPsf <= 160 ? say('ok', 'cosmetic territory')
+    : rBase.rehabPsf <= 350 ? say('ok', 'gut territory') : say('warn', 'above a normal gut');
   const holdVerdict = s.liveIn
-    ? (rBase.occupancyMonths >= 24
-        ? <span className="ok">past the two-year mark</span>
-        : <span className="bad">under two years — you lose the reason to do it this way</span>)
-    : rBase.holdMonths <= 8
-      ? <span className="ok">normal</span>
-      : rBase.holdMonths <= 11
-        ? <span className="warn">long — carry costs compound</span>
-        : <span className="bad">very long for a flip</span>;
-  const sellVerdict = rBase.sellPctOfSale <= 9
-    ? <span className="ok">in range</span>
-    : <span className="warn">above the usual 7–9%</span>;
+    ? (rBase.occupancyMonths >= 24 ? say('ok', 'past the two-year mark') : say('bad', 'under two years'))
+    : rBase.holdMonths <= 8 ? say('ok', 'normal')
+      : rBase.holdMonths <= 11 ? say('warn', 'long, carry costs compound') : say('bad', 'very long for a flip');
+  const sellVerdict = rBase.sellPctOfSale <= 9 ? say('ok', 'in range') : say('warn', 'above the usual 7–9%');
   const selIdx = 1;                       /* base ARV is the column to beat */
-  /* look a computed amount up by id so it can sit on its own input row */
   const amt = (lines: CostLine[], id: string) => lines.find(l => l.id === id)?.amount ?? 0;
   const allIn = s.price + rBase.acqTotal + rBase.rehabTotal + rBase.holdTotal + rBase.finTotal;
+  const finLabel = s.finMode === 'cash' ? 'All cash' : s.finMode === 'hard' ? 'Hard money' : 'Conventional';
+  const mo = (days: number) => `${(days / 30.4375).toFixed(1)} mo`;
 
-  const diverged = s.rehabSource === 'checklist' && sow.checkedCount > 0 &&
-    Math.abs(sow.total - s.rehab.base) > 1;
+  const isOpen = (id: string) => !(shut[id] ?? SHUT_BY_DEFAULT[id] ?? false);
+  const fold = (id: string) => ({ open: isOpen(id), onOpenChange: (o: boolean) => setShut(p => ({ ...p, [id]: !o })) });
 
   /* ---------- actions ---------- */
   const setAddress = (v: string) =>
     setS(p => ({ ...p, name: v.trim(), prop: { ...p.prop, address: v } }));
   const dealTitle = (d: FlipState) => d.prop.address?.trim() || d.name || 'Untitled';
 
-  function applyCity(slug: string) {
+  function cityPatch(slug: string): Partial<FlipState> {
     const c = findCity(slug);
-    setS(p => ({
-      ...p, citySlug: slug,
-      ...(c ? {
-        taxRatePct: c.taxRatePct,
-        transferPayer: c.payer,
-        retrofit: c.retrofit.reduce((a, x) => a + x.cost, 0),
-      } : {}),
-    }));
-    if (c) toast(`${c.name} preset applied — every value stays editable`);
+    return {
+      citySlug: slug,
+      ...(c ? { taxRatePct: c.taxRatePct, transferPayer: c.payer, retrofit: c.retrofit.reduce((a, x) => a + x.cost, 0) } : {}),
+    };
+  }
+  function applyCity(slug: string) {
+    setS(p => ({ ...p, ...cityPatch(slug) }));
+    const c = findCity(slug);
+    if (c) toast(`${c.name} preset applied. Every value stays editable`);
   }
 
-  /* One price per task means one total, so it lands on the base scenario. Low
-     and high stay yours to set — they are judgement about risk, not arithmetic. */
-  function pushSow() {
-    setS(p => ({ ...p, rehabSource: 'checklist', rehab: { ...p.rehab, base: Math.round(sow.total) } }));
-    toast('Base rehab updated from the scope of work');
+  /* Picking a suggested address does the typing for you: the city preset is
+     read off the address, and with a RentCast key saved, so are the size and
+     year built. */
+  async function pickAddress(full: string) {
+    const lower = full.toLowerCase();
+    const hit = citiesByCounty().flatMap(g => g.cities).find(c => lower.includes(`, ${c.name.toLowerCase()},`));
+    setS(p => ({ ...p, name: full.trim(), prop: { ...p.prop, address: full }, ...(hit && hit.slug !== p.citySlug ? cityPatch(hit.slug) : {}) }));
+    const filled: string[] = hit && hit.slug !== s.citySlug ? [`${hit.name} preset`] : [];
+    try {
+      const f = await lookupProperty(full);
+      if (f) {
+        setS(p => p.prop.address !== full ? p : {
+          ...p, prop: {
+            ...p.prop,
+            ...(f.sqft ? { sqft: f.sqft } : {}), ...(f.beds ? { beds: f.beds } : {}),
+            ...(f.baths ? { baths: Math.floor(f.baths), halfBaths: f.baths % 1 ? 1 : p.prop.halfBaths } : {}),
+            ...(f.year ? { year: String(f.year) } : {}),
+          },
+        });
+        if (f.sqft) filled.push('square feet');
+        if (f.year) filled.push('year built');
+      }
+    } catch { /* the lookup is a convenience; the fields stay editable */ }
+    if (filled.length) toast('Filled in ' + filled.join(', '));
   }
-
-  function setLevel(sp: SpaceInstance, level: 0 | Level) {
-    setS(p => ({
-      ...p,
-      checked: applyLevel(sp, level, p.checked),
-      spaceLevel: { ...p.spaceLevel, [sp.id]: level },
-    }));
-  }
-
 
   function saveDeal() {
-    if (!s.prop.address.trim()) { toast('Enter the property address first — it names the deal'); return; }
+    if (!s.prop.address.trim()) { toast('Enter the property address first. It names the deal'); return; }
     const deal: FlipState = { ...s, savedAt: new Date().toISOString() };
     const deals = [...savedDeals];
     const i = deals.findIndex(d => d.name === deal.name);
@@ -315,540 +280,361 @@ export default function FlipPage() {
     if (user) cloud.remove(name).catch(() => toast('Removed on this device — cloud delete failed'));
   }
 
-  const newDeal = () => { setS(defaultFlipState()); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const loadDeal = (d: FlipState) => { setS(normalizeFlip(d)); setShut({}); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const newDeal = () => { setS(defaultFlipState()); setShut({}); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const reset = () => { if (confirm('Reset every input to defaults?')) setS(defaultFlipState()); };
   const report = () => openReportWindow(buildFlipReport(s), '', () => toast('Allow pop-ups to open the report'));
-  const printSow = () => openReportWindow(buildScopeOfWork(s, catalogPrices), '', () => toast('Allow pop-ups to open the scope'));
 
-  const setCatalogPrice = (key: string, v: number) =>
-    setCatalogPrices(p => ({ ...p, [key]: v }));
-
-  /* one P&L row across the three scenario columns */
-  /* Share of the sale price, taken from the base column — the same reading the
-     waterfall gave, in the table that already has the numbers. */
+  /* ---------- the P&L table's rows ---------- */
   const shareOf = (n: number) => (rBase.sale > 0 ? (n / rBase.sale) * 100 : 0);
+  const cell = 'px-3 py-1.5 text-right tabular-nums whitespace-nowrap';
+  const onCol = (i: number) => i === selIdx && 'bg-primary-tint font-semibold text-ink-strong';
 
-  const PL = ({ label, pick, fmt = paren, cls, hint, share = true }: {
-    label: React.ReactNode; pick: (r: FlipResult) => number;
-    fmt?: (n: number) => string; cls?: string; hint?: string; share?: boolean;
-  }) => (
-    <tr className={cls}>
-      <td className="lb">{label}{hint && <span className="sub">{hint}</span>}</td>
-      {cols.map((c, i) => (
-        <td key={i} className={`n${i === selIdx ? ' on' : ''}${fmt === paren && pick(c) !== 0 ? ' neg' : ''}`}>
-          {fmt(pick(c))}
-        </td>
-      ))}
-      <td className="sh">{share ? pct(shareOf(Math.abs(pick(cols[selIdx])))) : ''}</td>
-    </tr>
+  const head = (label: string) => (
+    <tr key={`h-${label}`}><th colSpan={5} scope="colgroup" className="px-3 pb-1 pt-3 text-left text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">{label}</th></tr>
   );
-
-  /* an expandable cost group — detail rows come from the selected column */
-  const Fold = ({ id, label, pick, lines }: {
-    id: string; label: string; pick: (r: FlipResult) => number; lines: CostLine[];
-  }) => {
-    const open = !!expanded[id];
+  const pl = (label: string, pick: (r: FlipResult) => number, o: { fmt?: (n: number) => string; kind?: 'tot' | 'grand'; share?: boolean } = {}) => {
+    const fmt = o.fmt ?? paren, share = o.share ?? true;
     return (
-      <>
-        <tr>
-          <td className="lb">
-            <button className="exp" onClick={() => setExpanded(p => ({ ...p, [id]: !p[id] }))}>
-              {open ? '▾' : '▸'}
-            </button>{label}
-          </td>
-          {cols.map((c, i) => (
-            <td key={i} className={`n neg${i === selIdx ? ' on' : ''}`}>{paren(pick(c))}</td>
-          ))}
-          <td className="sh">{pct(shareOf(pick(cols[selIdx])))}</td>
-        </tr>
-        {open && lines.filter(l => l.amount !== 0).map((l, i) => (
-          <tr className="detail" key={i}>
-            <td className="lb">{l.label}</td>
-            <td className="n" colSpan={3}>{money0(l.amount)}</td>
-            <td className="sh">{pct(shareOf(l.amount))}</td>
-          </tr>
-        ))}
-      </>
+      <tr key={label} className={cn('border-b border-line/60', o.kind && 'border-t border-b-0 border-line-strong font-bold text-ink-strong', o.kind === 'grand' && 'text-[0.9375rem]')}>
+        <th scope="row" className="px-3 py-1.5 text-left font-[inherit] text-[#3a4352]">{label}</th>
+        {cols.map((c, i) => {
+          const v = pick(c);
+          return <td key={i} className={cn(cell, onCol(i), o.kind === 'grand' && (v < 0 ? 'text-destructive' : v >= s.minProfit ? 'text-success' : 'text-warning'))}>{fmt(v)}</td>;
+        })}
+        <td className={cn(cell, 'text-muted-foreground')}>{share ? pct(shareOf(Math.abs(pick(cols[selIdx])))) : ''}</td>
+      </tr>
     );
   };
+  /* a cost group that opens to its lines; detail comes from the base column */
+  const group = (id: string, label: string, pick: (r: FlipResult) => number, lines: CostLine[]) => {
+    const open = !!expanded[id];
+    return [
+      <tr key={id} className="border-b border-line/60">
+        <th scope="row" className="px-3 py-1.5 text-left font-normal text-[#3a4352]">
+          <button type="button" aria-expanded={open} onClick={() => setExpanded(p => ({ ...p, [id]: !p[id] }))}
+            className="-ml-1.5 inline-flex items-center gap-0.5 rounded-sm hover:text-ink-strong">
+            <Icon name="chevron_right" size={18} className={cn('text-muted-foreground transition-transform', open && 'rotate-90')} />{label}
+          </button>
+        </th>
+        {cols.map((c, i) => <td key={i} className={cn(cell, onCol(i))}>{paren(pick(c))}</td>)}
+        <td className={cn(cell, 'text-muted-foreground')}>{pct(shareOf(pick(cols[selIdx])))}</td>
+      </tr>,
+      ...(open ? lines.filter(l => l.amount !== 0).map((l, i) => (
+        <tr key={`${id}-${i}`} className="border-b border-line/40 text-[0.8125rem] text-muted-foreground">
+          <th scope="row" className="py-1 pl-8 pr-3 text-left font-normal">{l.label}</th>
+          <td /><td className={cn(cell, 'py-1', onCol(1), 'font-normal text-muted-foreground')}>{money0(l.amount)}</td><td />
+          <td className={cn(cell, 'py-1')}>{pct(shareOf(l.amount))}</td>
+        </tr>
+      )) : []),
+    ];
+  };
+
+  /* small shorthands so a row reads as one line */
+  const $ = (value: number, onChange: (n: number) => void, suffix?: string) =>
+    <NumberField value={value} onChange={onChange} suffix={suffix} />;
+  const n = (value: number, onChange: (n: number) => void, suffix?: string) =>
+    <NumberField value={value} onChange={onChange} fmt="raw" suffix={suffix} />;
+  const eq = (v: number) => `= ${money0(v)}`;
 
   /* ================================================================= render */
   return (
     <>
-      <div className="deal-head">
-        <div className="deal-topline">
-          <div className="deal-title-wrap" ref={menuWrapRef}>
-            <div className="addr-slot">
-              <AddressInput value={s.prop.address} onChange={setAddress}
+      {/* ---------- deal header ---------- */}
+      <div className="mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-[240px] max-w-[620px] flex-[1_1_340px] items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <AddressInput value={s.prop.address} onChange={setAddress} onPick={pickAddress}
                 placeholder="Property address — start typing to search" />
             </div>
-            <button className="caret-btn" title="Switch deal"
-              onClick={ev => { ev.stopPropagation(); setMenuOpen(o => !o); }}>▾</button>
-            <div className={`deal-menu${menuOpen ? ' open' : ''}`}>
-              <div className="dm-item new" onClick={newDeal}><Icon name="add" size={18} />New deal</div>
-              {!savedDeals.length && <div className="dm-empty">No saved flips yet — hit “Save deal” to keep one here.</div>}
-              {[...savedDeals].sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || '')).map(d => {
-                const dr = computeFlip(d, 'base');
-                return (
-                  <div className="dm-item" key={d.name}
-                    onClick={() => { setS(normalizeFlip(d)); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-                    <div>
-                      <div className="dm-n">{dealTitle(d)}</div>
-                      <div className="dm-m">{money0(d.price)} · {money(dr.profit)} profit · {dr.roi.toFixed(0)}% ROI</div>
+            <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+              <PopoverTrigger render={<Button variant="ghost" size="icon" aria-label="Switch deal" title="Switch deal" />}>
+                <Icon name="expand_more" size={22} />
+              </PopoverTrigger>
+              <PopoverContent align="end" className="max-h-[60vh] w-[min(22rem,calc(100vw-2rem))] gap-0.5 overflow-auto p-1.5">
+                <button type="button" onClick={newDeal}
+                  className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-2 text-left text-sm font-bold text-primary hover:bg-primary-tint">
+                  <Icon name="add" size={18} />New deal
+                </button>
+                {!savedDeals.length && <p className="px-2.5 py-2 text-[0.8125rem] text-muted-foreground">No saved flips yet. Use “Save deal” to keep one here.</p>}
+                {[...savedDeals].sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || '')).map(d => {
+                  const dr = computeFlip(d, 'base');
+                  return (
+                    <div className="flex items-center gap-1 rounded-md hover:bg-muted" key={d.name}>
+                      <button type="button" className="min-w-0 flex-1 rounded-md px-2.5 py-2 text-left" onClick={() => loadDeal(d)}>
+                        <span className="block truncate text-sm font-semibold text-ink-strong">{dealTitle(d)}</span>
+                        <span className="block text-[0.8125rem] tabular-nums text-muted-foreground">{money0(d.price)} · {money(dr.profit)} profit · {dr.roi.toFixed(0)}% ROI</span>
+                      </button>
+                      <Button variant="ghost" size="icon-sm" aria-label={`Delete ${dealTitle(d)}`} title="Delete"
+                        className="mr-1 text-muted-foreground hover:bg-destructive-soft hover:text-destructive"
+                        onClick={ev => { ev.stopPropagation(); deleteDeal(d.name); }}>
+                        <Icon name="close" size={16} />
+                      </Button>
                     </div>
-                    <button className="dm-del" title="Delete"
-                      onClick={ev => { ev.stopPropagation(); deleteDeal(d.name); }}>✕</button>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </PopoverContent>
+            </Popover>
           </div>
-          <div className="deal-actions">
-            <button className="btn" onClick={report} title="Open a print-ready deal report"><Icon name="download" size={18} />PDF</button>
-            <button className="btn primary" onClick={saveDeal}>Save deal</button>
-            <button className="btn ghost" onClick={reset}>Reset</button>
+          <div className="flex shrink-0 flex-wrap gap-2 print:hidden">
+            <Button variant="outline" onClick={report} title="Open a print-ready deal report"><Icon name="download" size={18} />PDF</Button>
+            <Button onClick={saveDeal}>Save deal</Button>
+            <Button variant="ghost" onClick={reset}>Reset</Button>
           </div>
         </div>
 
         {/* Plain anchors, so the address goes nowhere until you click one. */}
         {links.length > 0 && (
-          <div className="listing-links">
-            <span className="ll-lb">Look it up</span>
+          <nav aria-label="Look the property up" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.9375rem] font-semibold">
             {links.map(l => (
-              <a key={l.id} className={`ll${l.kind === 'search' ? ' search' : ''}`} href={l.href}
-                target="_blank" rel="noopener noreferrer" title={l.title}>{l.label}</a>
+              <a key={l.id} href={l.href} target="_blank" rel="noopener noreferrer" title={l.title}
+                className="inline-flex items-center gap-0.5 text-primary hover:text-primary-hover hover:underline">
+                {l.label}<Icon name="open_in_new" size={14} />
+              </a>
             ))}
-          </div>
+          </nav>
         )}
       </div>
 
-      <nav className="tabs">
-        <button className={`tab${tab === 'assumptions' ? ' on' : ''}`} onClick={() => setTab('assumptions')}>Assumptions</button>
-        <button className={`tab${tab === 'model' ? ' on' : ''}`} onClick={() => setTab('model')}>
-          Deal Model <span className="badge">{compact(rBase.profit)}</span></button>
-        <button className={`tab${tab === 'sow' ? ' on' : ''}`} onClick={() => setTab('sow')}>
-          Scope of Work <span className="badge">{sow.checkedCount ? money0(sow.total) : '0'}</span></button>
-      </nav>
+      <div className="grid items-start gap-4 min-[1100px]:grid-cols-[360px_minmax(0,1fr)]">
+        {/* ============================================ LEFT: INPUTS */}
+        <div className="flex min-w-0 flex-col gap-3">
+          <Panel dense title="The deal" tag={`${money0(s.arv.base - s.price)} spread`} {...fold('deal')}>
+            <Field label="City" info="Sets the property tax rate, who pays transfer tax and the retrofit cost. These swing hugely by city: most of San Mateo and Santa Clara sit at the county floor; Oakland and Berkeley do not.">
+              <NativeSelect size="sm" className="w-40 shrink-0" value={s.citySlug} aria-label="City" onChange={ev => applyCity(ev.target.value)}>
+                <option value="">Not listed</option>
+                {citiesByCounty().map(g => (
+                  <optgroup key={g.county} label={`${g.county} County`}>
+                    {g.cities.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+                  </optgroup>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field label="Square feet" info="Living area from the tax record. Every per-foot figure divides by it.">
+              {n(sqft, v => setProp('sqft', v), 'sf')}</Field>
+            <Field label="Purchase price" hint={psf(s.price, sqft)}
+              info={<>The 70% rule says {money0(seventy)}. Your own numbers say {money0(mao)}.</>}>
+              {$(s.price, v => set('price', v))}</Field>
+            <SectionLabel>After-repair value</SectionLabel>
+            <Field label="Low" hint={psf(s.arv.low, sqft)} info="What it sells for in a slow month with a picky appraiser.">
+              {$(s.arv.low, v => setArv('low', v))}</Field>
+            <Field label="Base" hint={psf(s.arv.base, sqft)} info="Closed comps within half a mile and 90 days, adjusted to your finish.">
+              {$(s.arv.base, v => setArv('base', v))}</Field>
+            <Field label="High" hint={psf(s.arv.high, sqft)} info="Top of the range if the finish lands. Never underwrite to it.">
+              {$(s.arv.high, v => setArv('high', v))}</Field>
+            <Line total label="Gross spread" value={`${money0(s.arv.base - s.price)} · ${pct(rBase.grossSpread)}`}
+              hint={spreadVerdict} info={<><b>Target 25–30% of ARV.</b> Base ARV less the purchase price, before any cost.</>} />
+            <Field label="Minimum profit" info="What the deal has to clear for you to do it. Sets the verdict, the max offer, and where the profit grid turns green.">
+              {$(s.minProfit, v => set('minProfit', v))}</Field>
+          </Panel>
 
-      {/* ============================================ TAB 1 — ASSUMPTIONS */}
-      <section className={`pane${tab === 'assumptions' ? ' on' : ''}`}>
-        {/* Max offer leads: the whole point of underwriting a flip is arriving
-            at the number you can pay. Everything else is how it was reached. */}
-        <div className="sumry">
-          <div className="hero"><div className="k">Max offer</div>
-            <div className="v">{money0(mao)}</div>
-            <div className="s">for {money0(s.minProfit)} profit</div></div>
-          <div><div className="k">Net profit</div>
-            <div className={`v ${rBase.profit < 0 ? 'neg' : rBase.profit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.profit)}</div>
-            <div className="s">at {money0(s.price)}</div></div>
-          <div><div className="k">Profit floor</div><div className="v">{money0(s.minProfit)}</div>
-            <div className="s">{rBase.profit >= s.minProfit
-              ? `${money0(rBase.profit - s.minProfit)} of headroom`
-              : `${money0(s.minProfit - rBase.profit)} short`}</div></div>
-          <div><div className="k">ROI · annual</div><div className="v">{pct(rBase.roi)}</div>
-            <div className="s">{pct(rBase.annualizedRoi)} annualized</div></div>
-          <div><div className="k">Peak cash</div><div className="v">{money0(rBase.peakCash)}</div>
-            <div className="s">{s.finMode === 'cash' ? 'all cash' : s.finMode === 'hard' ? 'hard money' : 'conventional'}</div></div>
+          <Panel dense title="Rehab &amp; timeline" tag={`${money0(s.rehab.base)} · ${holdLabel(rBase.holdMonths)}`} {...fold('rehab')}>
+            <SectionLabel>Rehab budget</SectionLabel>
+            <Field label="Low" hint={psf(s.rehab.low, sqft)} info="Everything goes right: no dry rot, no surprises behind the walls.">
+              {$(s.rehab.low, v => setRehab('low', v))}</Field>
+            <Field label="Base" hint={<>{psf(s.rehab.base, sqft)} · {rehabVerdict}</>}
+              info={<>What you would tell a partner the job costs. The deal lives on it. Bay Area pricing: cosmetic <b>$90–160/sf</b>, full gut <b>$200–350/sf</b>.</>}>
+              {$(s.rehab.base, v => setRehab('base', v))}</Field>
+            <Field label="High" hint={psf(s.rehab.high, sqft)} info="You open the walls and find why it was cheap. The honest case for a pre-1950 house.">
+              {$(s.rehab.high, v => setRehab('high', v))}</Field>
+            <SectionLabel>Timeline</SectionLabel>
+            <Field label="Rehab duration" hint={mo(s.rehabDays)} info="Fold permits in. Bay Area plan check adds 60–120 days before a shovel moves.">
+              {n(s.rehabDays, v => set('rehabDays', v), 'days')}</Field>
+            <Field label="Days on market" hint={mo(s.domDays)} info="List to accepted offer. The Bay Area ran 15–25 days through 2026.">
+              {n(s.domDays, v => set('domDays', v), 'days')}</Field>
+            <Field label="Escrow period" hint={mo(s.escrowDays)} info="Accepted offer to close. 21–30 days is standard; a cash buyer can do 14.">
+              {n(s.escrowDays, v => set('escrowDays', v), 'days')}</Field>
+            <Field label="Schedule overrun" hint={mo(s.overrunDays)} info="Add days to see what a slip costs. The cheapest stress test here.">
+              {n(s.overrunDays, v => set('overrunDays', v), 'days')}</Field>
+            <Field label="Live-in flip" hint={s.liveIn ? `${rBase.occupancyMonths.toFixed(0)} months occupied` : undefined}
+              info="You move in, hold past two years, then sell. The months you live there are not vacant, so an empty house's costs never happen, and the housing you would have paid for anyway is not a cost of the deal.">
+              <Toggle checked={s.liveIn} onChange={v => set('liveIn', v)} /></Field>
+            {s.liveIn && <>
+              <Field label="Months you live there" hint={`${(s.occupancyMonths / 12).toFixed(1)} yrs`}
+                info="Between finishing the work and listing. Days on market and escrow also count toward the two years, so 22 here already clears it.">
+                {n(s.occupancyMonths, v => set('occupancyMonths', v), 'mo')}</Field>
+              <Field label="Housing you would pay anyway" hint={`${money0(rBase.housingCredit)} credited back`}
+                info="Rent on the place you would otherwise live. It is credited against the deal, capped at what those months actually cost you.">
+                {$(s.avoidedHousing, v => set('avoidedHousing', v), '/mo')}</Field>
+            </>}
+            <Line total label="Total hold" value={`${holdLabel(rBase.holdMonths)} · ${rBase.holdMonths.toFixed(1)} mo`} hint={holdVerdict}
+              info={s.liveIn
+                ? <>{rBase.vacantMonths.toFixed(1)} months empty, {rBase.occupancyMonths.toFixed(0)} lived in. Only the empty months carry a vacant house. The clock is set by the <b>two-year</b> residency rather than by carry.</>
+                : <>Bay Area flips run <b>150–240 days</b> door to door. Every extra day costs holding and interest at once: a 30-day slip costs roughly {money0(rBase.holdMonthly + rBase.interest / Math.max(1, rBase.holdMonths))}.</>} />
+          </Panel>
 
-          <div><div className="k">Purchase</div><div className="v">{money0(s.price)}</div>
-            <div className="s">{psf(s.price, sqft)}</div></div>
-          <div><div className="k">ARV — base</div><div className="v">{money0(s.arv.base)}</div>
-            <div className="s">{psf(s.arv.base, sqft)}</div></div>
-          <div><div className="k">Rehab — base</div><div className="v">{money0(s.rehab.base)}</div>
-            <div className="s">{psf(s.rehab.base, sqft)}</div></div>
-          <div><div className="k">Gross spread</div><div className="v">{pct(rBase.grossSpread)}</div>
-            <div className="s">target 25–30%</div></div>
-          <div><div className="k">All-in cost</div><div className="v">{money0(allIn)}</div>
-            <div className="s">{psf(allIn, sqft)} · {holdLabel(rBase.holdMonths)}</div></div>
+          <Panel dense title="Financing" tag={`${money0(rBase.finTotal)} · ${finLabel}`} {...fold('fin')}>
+            <Field label="Loan type" info="Hard money funds the rehab in draws. Conventional funds only the purchase. All cash ties up every dollar but pays no interest.">
+              <Segmented options={[{ u: 'hard', label: 'Hard' }, { u: 'conv', label: 'Conv.' }, { u: 'cash', label: 'Cash' }]}
+                value={s.finMode} onChange={u => set('finMode', u as FlipState['finMode'])} />
+            </Field>
+            {s.finMode === 'hard' && <>
+              <Field label="Loan-to-cost" hint={eq(rBase.loanAtClose)} info="Share of the purchase the lender funds. Bay Area hard money runs 85–90%.">
+                {n(s.ltcPct, v => set('ltcPct', v), '%')}</Field>
+              <Field label="Rehab financed" hint={eq(rBase.rehabTotal - rBase.cashForRehab)} info="Usually 100%, released in draws as work is inspected.">
+                {n(s.rehabFinancedPct, v => set('rehabFinancedPct', v), '%')}</Field>
+              <Field label="Interest rate" hint={eq(rBase.interest)} info="9.5–12% in 2026. Interest-only on the drawn balance.">
+                {n(s.hardRate, v => set('hardRate', v), '%')}</Field>
+              <Field label="Points" hint={eq(amt(rBase.finLines, 'points'))} info="1.5–3 points at close, on the purchase loan plus the rehab holdback.">
+                {n(s.pointsPct, v => set('pointsPct', v), '%')}</Field>
+              <Field label="Lender fees" info="Underwriting, doc prep, legal. $1–2k is typical.">
+                {$(s.hardFees, v => set('hardFees', v))}</Field>
+              <Field label="Number of draws" info="Fewer, larger draws cost less. Each one also waits on an inspection.">
+                {n(s.drawCount, v => set('drawCount', v))}</Field>
+              <Field label="Fee per draw" hint={eq(amt(rBase.finLines, 'drawFees'))} info="$250–500 each.">
+                {$(s.drawFee, v => set('drawFee', v))}</Field>
+              <Field label="Minimum interest" info="Most lenders guarantee 3–6 months of interest even if you pay off early.">
+                {n(s.minInterestMonths, v => set('minInterestMonths', v), 'mo')}</Field>
+              <Field label="Extension fee" hint={eq(amt(rBase.finLines, 'extension'))} info="Charged when the schedule overrun is more than zero. 0.5–1 point.">
+                {n(s.extensionFeePct, v => set('extensionFeePct', v), '%')}</Field>
+            </>}
+            {s.finMode === 'conv' && <>
+              <Field label="Loan-to-value" hint={eq(rBase.loanAtClose)} info="Against the purchase price, not total cost. A conventional loan funds no rehab.">
+                {n(s.ltvPct, v => set('ltvPct', v), '%')}</Field>
+              <Field label="Interest rate" hint={eq(rBase.interest)} info="Investment property prices 50–75bp over owner-occupied.">
+                {n(s.convRate, v => set('convRate', v), '%')}</Field>
+              <Field label="Term" info="Sets the payment. The loan is paid off at sale regardless.">
+                {n(s.convTerm, v => set('convTerm', v), 'yrs')}</Field>
+              <Field label="Interest only" info="Take it on a flip. Amortising parks cash in principal you get back anyway.">
+                <Toggle checked={s.convIO} onChange={v => set('convIO', v)} /></Field>
+              <Field label="Origination" hint={eq(amt(rBase.finLines, 'origination'))} info="On the loan amount only. There is no rehab commitment to charge against.">
+                {n(s.originationPct, v => set('originationPct', v), '%')}</Field>
+              <Field label="Lender fees" info="Underwriting, appraisal review, doc prep.">
+                {$(s.convFees, v => set('convFees', v))}</Field>
+              <Field label="Prepayment penalty" hint={eq(amt(rBase.finLines, 'prepay'))} info="Some investor products carry one, and a flip pays off inside the window.">
+                {n(s.prepayPct, v => set('prepayPct', v), '%')}</Field>
+            </>}
+            <Line total label="Financing cost" value={money0(rBase.finTotal)}
+              info={s.finMode === 'cash' ? 'No loan, no lender, no interest. Every dollar of purchase and rehab is yours.'
+                : `${pct(s.arv.base > 0 ? rBase.finTotal / s.arv.base * 100 : 0)} of ARV. After rehab, usually the second-largest cost.`} />
+            <Line label="Loan at close" value={money0(rBase.loanAtClose)} info="Funded at close, before any rehab draw." />
+            <Line label="Down payment" value={money0(rBase.downPayment)} info="Purchase price less the loan." />
+            <Line label="Cash needed for rehab" value={money0(rBase.cashForRehab)}
+              info={s.finMode === 'hard' ? 'Only the unfinanced share. The lender reimburses the rest by draw.' : 'The whole rehab. No lender is funding any of it.'} />
+            <Line strong label="Peak cash out of pocket" value={money0(rBase.peakCash)} info="The number that decides whether you can do this deal at all." />
+          </Panel>
+
+          <Panel dense title="Acquisition costs" tag={money0(rBase.acqTotal)} {...fold('acq')}>
+            <Field label="Seller disclosure package" info="California sellers normally deliver TDS, SPQ, NHD and the pest, home and roof reports before offers. Switching this on zeroes the lines it covers.">
+              <Toggle checked={s.sellerDisclosure} onChange={v => set('sellerDisclosure', v)} /></Field>
+            <Field label="Buy-side commission" hint={eq(amt(rBase.acqLines, 'buySideComm'))} info="What you pay a buyer's agent to acquire. If you represent yourself it is income, not a cost.">
+              {n(s.buySideCommPct, v => set('buySideCommPct', v), '%')}</Field>
+            {ACQ_ITEMS.map(i => {
+              /* covered by the package: the value you typed is kept, greyed out,
+                 and excluded from the total until you switch the package off */
+              const covered = s.sellerDisclosure && SELLER_PROVIDED.has(i.id);
+              return (
+                <Field key={i.id} label={i.label} hint={covered ? 'covered by the seller' : undefined} info={i.note}>
+                  <NumberField value={s.acq[i.id] ?? 0} disabled={covered} className={covered ? 'line-through' : undefined}
+                    onChange={v => setMap('acq', i.id, v)} /></Field>
+              );
+            })}
+            {rBase.acqLines.filter(l => l.derived && l.id !== 'buySideComm' && l.amount !== 0).map((l, i) => (
+              <Line key={i} label={l.label} value={money0(l.amount)} info="Computed from the city preset and who pays." />
+            ))}
+            <Line total label="Total acquisition" value={money0(rBase.acqTotal)}
+              hint={`${pct(s.price > 0 ? rBase.acqTotal / s.price * 100 : 0)} of price`} info="Loan points are not here. They live under Financing." />
+          </Panel>
+
+          <Panel dense title="Holding costs" tag={`${money0(rBase.holdTotal)}${s.liveIn ? '' : ` · ${money0(rBase.holdMonthly)}/mo`}`} {...fold('hold')}>
+            <Field label="Property tax rate" hint={eq(rBase.propertyTax)} info="The levied rate: 1% Prop 13 base plus local bonds. A published “effective rate” understates this by a third.">
+              {n(s.taxRatePct, v => set('taxRatePct', v), '%')}</Field>
+            <Field label="Prior assessed value" hint={rBase.supplementalTax > 0 ? `supplemental ${money0(rBase.supplementalTax)}` : undefined}
+              info="From the county assessor. Only used to break out the supplemental tax bill.">
+              {$(s.priorAssessed, v => set('priorAssessed', v))}</Field>
+            <Field label="Builder's risk insurance" hint={eq(amt(rBase.holdLines, 'builderRisk'))} info="Covers the structure while it is open. 1–3% of rehab, or $150–300 a month.">
+              <div className="flex items-center gap-1.5">
+                <Segmented options={[{ u: '$', label: '$/mo' }, { u: '%', label: '%' }]}
+                  value={s.builderRiskUnit} onChange={u => set('builderRiskUnit', u as '$' | '%')} />
+                {n(s.builderRisk, v => set('builderRisk', v))}
+              </div>
+            </Field>
+            <SectionLabel>Monthly operating</SectionLabel>
+            {HOLD_ITEMS.map(i => (
+              <Field key={i.id} label={i.label} hint={eq(amt(rBase.holdLines, i.id))}
+                info={s.liveIn && i.vacantOnly ? <>Empty months only, since nobody needs it while you live there. {i.note}</> : i.note}>
+                {$(s.hold[i.id] ?? 0, v => setMap('hold', i.id, v), '/mo')}</Field>
+            ))}
+            {rBase.housingCredit > 0 && (() => {
+              /* only the share that lands in this panel, so the column adds up;
+                 the rest offsets interest under Financing */
+              const here = Math.abs(amt(rBase.holdLines, 'housingCredit'));
+              const elsewhere = rBase.housingCredit - here;
+              return <Line tone="pos" label="Housing you would pay anyway" value={`(${money0(here)})`}
+                info={elsewhere > 0 ? <>Covers this carry in full. The other {money0(elsewhere)} offsets interest, under Financing.</>
+                  : <>{rBase.occupancyMonths.toFixed(0)} months at {money0(s.avoidedHousing)} a month.</>} />;
+            })()}
+            <Line total label={`Total over ${rBase.holdMonths.toFixed(1)} months`} value={money0(rBase.holdTotal)}
+              hint={`${pct(s.arv.base > 0 ? rBase.holdTotal / s.arv.base * 100 : 0)} of ARV`} info="Runs whether or not anyone is working on the house." />
+          </Panel>
+
+          <Panel dense title="Selling costs" tag={`${money0(rBase.sellTotal)} · ${pct(rBase.sellPctOfSale)}`} {...fold('sell')}>
+            <Field label="Listing commission" hint={eq(amt(rBase.sellLines, 'listComm'))} info="2.5% is standard. If you list it yourself, that side is income to you, not an expense.">
+              {n(s.listCommPct, v => set('listCommPct', v), '%')}</Field>
+            <Field label="Buyer agent commission" hint={eq(amt(rBase.sellLines, 'buyerComm'))} info="Negotiable since the NAR settlement, but 2.5% still gets it shown.">
+              {n(s.buyerCommPct, v => set('buyerCommPct', v), '%')}</Field>
+            <Field label="Transfer tax paid by" hint={eq(amt(rBase.sellLines, 'sellCityTax') + amt(rBase.sellLines, 'sellCountyTax'))}
+              info={city ? `${city.name} custom is pre-filled. On a large bill this is negotiable.` : 'Local custom varies. Pick a city to pre-fill it.'}>
+              <Segmented options={[{ u: 'seller', label: 'Seller' }, { u: 'split', label: 'Split' }, { u: 'buyer', label: 'Buyer' }]}
+                value={s.transferPayer} onChange={u => set('transferPayer', u as FlipState['transferPayer'])} />
+            </Field>
+            {SELL_FLAT_ITEMS.map(i => (
+              <Field key={i.id} label={i.label} info={i.note}>{$(s.sell[i.id] ?? 0, v => setMap('sell', i.id, v))}</Field>
+            ))}
+            <Field label="Staging" hint={eq(amt(rBase.sellLines, 'stagingHold'))} info="$1–1.5k a month through days on market plus escrow.">
+              {$(s.stagingMo, v => set('stagingMo', v), '/mo')}</Field>
+            <Field label="Retrofit compliance"
+              info={city ? `Required in ${city.name}: ${city.retrofit.map(x => x.label).join(', ')}.` : 'Lateral certificate, water heater strapping, alarms. Varies by city.'}>
+              {$(s.retrofit, v => set('retrofit', v))}</Field>
+            <Field label="Seller concessions" hint={eq(amt(rBase.sellLines, 'concessions'))} info="Credits after the buyer’s inspection. 0.5% is light; 1% is safer on an older house.">
+              {n(s.concessionsPct, v => set('concessionsPct', v), '%')}</Field>
+            <Field label="CA 3.33% withholding" hint={rBase.withholding > 0 ? `${money0(rBase.withholding)} held at close` : undefined}
+              info="Escrow withholds it at close and credits it on your return. It moves cash timing, never profit.">
+              <Toggle checked={s.withholdingOn} onChange={v => set('withholdingOn', v)} /></Field>
+            <Line total label="Total selling costs" value={money0(rBase.sellTotal)} hint={<>{pct(rBase.sellPctOfSale)} of sale · {sellVerdict}</>}
+              info={<>All-in Bay Area selling costs run <b>7–9% of the sale price</b>. Most of these are percentages of the sale, so they are recomputed for each ARV scenario.</>} />
+          </Panel>
         </div>
 
-        {city?.note && <div className="notice warn"><div><b>{city.name}</b>{city.note}</div></div>}
+        {/* ============================================ RIGHT: RESULTS */}
+        <div className="flex min-w-0 flex-col gap-4">
+          <Verdict tone={verdict.v} title={verdict.title}>{verdict.sub}</Verdict>
 
-        {s.liveIn && (
-          <div className="notice">
-            <div><b>Why the two years are the whole point</b>
-              Live there 24 of the last 60 months and the gain stops being ordinary flip income taxed at
-              your full rate plus self-employment tax. It becomes a long-term capital gain, and §121
-              excludes the first $250,000 of it, $500,000 if you are married. None of that is computed
-              here — the <Link href="/tax">Income Tax Calculator</Link> has both.</div>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
+            <Stat label="Max Offer" value={money0(mao)} note={`for ${money0(s.minProfit)} profit · 70% rule ${money0(seventy)}`} />
+            <Stat label="Net Profit" value={money(rBase.profit)} tone={rBase.profit < 0 ? 'neg' : rBase.profit >= s.minProfit ? 'pos' : undefined}
+              note={rBase.profit >= s.minProfit ? `${money0(rBase.profit - s.minProfit)} over your floor` : `${money0(s.minProfit - rBase.profit)} short of your floor`} />
+            <Stat label="ROI on Cash" value={pct(rBase.roi)} note={`${pct(rBase.annualizedRoi)} annualized`} />
+            <Stat label="Peak Cash" value={money0(rBase.peakCash)} note={finLabel.toLowerCase()} />
+            <Stat label="All-in Cost" value={money0(allIn)} note={[psf(allIn, sqft), holdLabel(rBase.holdMonths)].filter(Boolean).join(' · ')} />
+            <Stat label="Margin" value={pct(rBase.margin)} note="profit as a share of ARV" />
           </div>
-        )}
-        {s.liveIn && s.finMode === 'hard' && (
-          <div className="notice warn">
-            <div><b>Hard money does not stretch to {holdLabel(rBase.holdMonths)}</b>
-              A bridge loan at {s.hardRate}% is priced for months and most lenders will not extend one
-              past 18. Living there makes you owner-occupied, which prices below an investment loan
-              rather than above it.</div>
-            <div className="act"><button onClick={() => set('finMode', 'conv')}>Switch to conventional</button></div>
-          </div>
-        )}
 
-        <div className="sow-bar">
-          <button className="btn" onClick={() => setShutSecs(
-            allShut ? {} : Object.fromEntries(ASSUM_SECS.map(id => [id, true])))}>
-            {allShut ? 'Expand all' : 'Collapse all'}</button>
-          <span className="bar-note">Each section keeps its headline figure when shut.</span>
-        </div>
-
-        <div className="sheet one"><table className="ss with-notes">
-          {/* widths live in CSS, not inline, so the media queries can take them
-              back on a narrow screen */}
-          <colgroup>
-            <col className="c-lb" /><col className="c-n" /><col className="c-u" />
-            <col className="c-amt" /><col className="c-note" />
-          </colgroup>
-          <tbody>
-
-          <Band span={5} {...fold('prop')} tag={`${sqft.toLocaleString()} sf · ${s.prop.beds}bd / ${s.prop.baths}ba`}>Property &amp; deal</Band>
-          {secOpen('prop') && <>
-          <R label="City" note="Swings hugely by city — most of San Mateo and Santa Clara sit at the county floor; Oakland and Berkeley do not." ctl={
-            <select className="sel-city" value={s.citySlug} onChange={ev => applyCity(ev.target.value)}>
-              <option value="">Not listed — enter rates manually</option>
-              {citiesByCounty().map(g => (
-                <optgroup key={g.county} label={`${g.county} County`}>
-                  {g.cities.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
-                </optgroup>
-              ))}
-            </select>} />
-          <R label="Square feet" note="Living area from the tax record. Every per-foot figure divides by it.">
-            <Money value={sqft} onChange={v => setProp('sqft', v)} /></R>
-          <R label="Beds / full baths / half" note="Drives scope-of-work quantities — a 4/3 prices three showers, not one." ctl={
-            <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
-              <Count value={s.prop.beds} onChange={v => setProp('beds', v)} max={10} />
-              <Count value={s.prop.baths} onChange={v => setProp('baths', v)} max={10} />
-              <Count value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} max={5} />
-            </div>} />
-          <R label="Stories / garage bays" note="Estimates the foundation perimeter for seismic work and gutters." ctl={
-            <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 4 }}>
-              <Count value={s.prop.stories} onChange={v => setProp('stories', v)} max={4} from={1} />
-              <Count value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} max={4} />
-            </div>} />
-          <R label="Year built" note="Pre-1980 assume asbestos and lead; pre-1950 assume knob-and-tube and an unbolted foundation." ctl={
-            <input className="num small" value={s.prop.year} autoComplete="off"
-              onChange={ev => setProp('year', ev.target.value)} />} />
-          </>}
-
-          <Band span={5} {...fold('value')} tag={`${money0(s.arv.base - s.price)} spread · ${pct(rBase.grossSpread)}`}>Purchase &amp; after-repair value</Band>
-          {secOpen('value') && <>
-          <R label="Purchase price" unit={psf(s.price, sqft)} amount={money0(s.price)}
-            note={<>70% rule says {money0(seventyRule(s))}; your own underwrite says {money0(mao)}.</>}>
-            <Money value={s.price} onChange={v => set('price', v)} /></R>
-          <R label="ARV — low" unit={psf(s.arv.low, sqft)} amount={money0(s.arv.low)}
-            note="What it sells for in a slow month with a picky appraiser.">
-            <Money value={s.arv.low} onChange={v => setArv('low', v)} /></R>
-          <R label="ARV — base" unit={psf(s.arv.base, sqft)} amount={money0(s.arv.base)}
-            note="Closed comps within half a mile and 90 days, adjusted to your finish.">
-            <Money value={s.arv.base} onChange={v => setArv('base', v)} /></R>
-          <R label="ARV — high" unit={psf(s.arv.high, sqft)} amount={money0(s.arv.high)}
-            note="Top of the range if the finish lands. Never underwrite to it.">
-            <Money value={s.arv.high} onChange={v => setArv('high', v)} /></R>
-          <V cls="tot" label="Gross spread at base ARV" value={money0(s.arv.base - s.price)}
-            unit={pct(rBase.grossSpread)}
-            note={<><b>Target 25–30% of ARV.</b> You are at {pct(rBase.grossSpread)} — {spreadVerdict}.</>} />
-          </>}
-
-          <Band span={5} {...fold('rehab')} tag={`${money0(s.rehab.base)} · ${s.rehabSource === 'checklist' ? 'from checklist' : 'manual'}`}>Rehab budget</Band>
-          {secOpen('rehab') && <>
-          <G>Bay Area pricing: cosmetic <b>$90–160/sf</b>, full gut <b>$200–350/sf</b>. Yours is {money0(rBase.rehabPsf)}/sf at base — {rehabVerdict}. Build it on the Scope of Work tab and push it here.</G>
-          <R label="Rehab — low" unit={psf(s.rehab.low, sqft)} amount={money0(s.rehab.low)}
-            note="Everything goes right: no dry rot, no surprises behind the walls.">
-            <Money value={s.rehab.low} onChange={v => setRehab('low', v)} /></R>
-          <R label="Rehab — base" unit={psf(s.rehab.base, sqft)} amount={money0(s.rehab.base)}
-            note="What you would tell a partner the job costs. The deal lives on it.">
-            <Money value={s.rehab.base} onChange={v => setRehab('base', v)} /></R>
-          <R label="Rehab — high" unit={psf(s.rehab.high, sqft)} amount={money0(s.rehab.high)}
-            note="You open the walls and find why it was cheap. Honest case pre-1950.">
-            <Money value={s.rehab.high} onChange={v => setRehab('high', v)} /></R>
-          </>}
-
-          <Band span={5} {...fold('time')} tag={holdLabel(rBase.holdMonths)}>Timeline</Band>
-          {secOpen('time') && <>
-          <G>{s.liveIn
-            ? <>You live here, so the clock is set by the <b>two-year</b> residency rather than by carry. Yours is {rBase.occupancyMonths.toFixed(0)} months occupied — {holdVerdict}.</>
-            : <>Every extra day costs holding <b>and</b> interest at once. Bay Area flips run <b>150–240 days</b> door to door. Yours is {Math.round(rBase.holdMonths * 30.4375)} — {holdVerdict}.</>}</G>
-          <R label="Rehab duration" unit="days" amount={`${(s.rehabDays / 30.4375).toFixed(1)} mo`}
-            note="Fold permits in. Bay Area plan check adds 60–120 days before a shovel moves.">
-            <Num value={s.rehabDays} onChange={v => set('rehabDays', v)} /></R>
-          <R label="Days on market" unit="days" amount={`${(s.domDays / 30.4375).toFixed(1)} mo`}
-            note="List to accepted offer. Bay Area ran 15–25 days through 2026.">
-            <Num value={s.domDays} onChange={v => set('domDays', v)} /></R>
-          <R label="Escrow period" unit="days" amount={`${(s.escrowDays / 30.4375).toFixed(1)} mo`}
-            note="Accepted offer to close. 21–30 days standard; a cash buyer can do 14.">
-            <Num value={s.escrowDays} onChange={v => set('escrowDays', v)} /></R>
-          <R label="Schedule overrun" unit="days" amount={`${(s.overrunDays / 30.4375).toFixed(1)} mo`}
-            note="Add days to see what a slip costs. The cheapest stress test here.">
-            <Num value={s.overrunDays} onChange={v => set('overrunDays', v)} /></R>
+          {city?.note && <Note tone="warn" icon="location_city" title={city.name}>{city.note}</Note>}
           {s.liveIn && (
-            <R label="Months you live there" unit="mo" amount={`${(s.occupancyMonths / 12).toFixed(1)} yrs`}
-              note="Between finishing the work and listing. The days on market and escrow above also count toward the two years, so 22 here already clears it.">
-              <Num value={s.occupancyMonths} onChange={v => set('occupancyMonths', v)} /></R>
+            <Note icon="home" title="Why the two years are the whole point">
+              Live there 24 of the last 60 months and the gain stops being ordinary flip income. It becomes a
+              long-term capital gain, and §121 excludes the first $250,000 of it, $500,000 if you are married.
+              None of that is computed here. The <Link href="/tax" className="font-semibold text-primary hover:underline">Income Tax Calculator</Link> has both.
+            </Note>
           )}
-          <V cls="tot" label="Total hold period" value={holdLabel(rBase.holdMonths)}
-            unit={`${rBase.holdMonths.toFixed(1)} mo`}
-            note={s.liveIn
-              ? <>{rBase.vacantMonths.toFixed(1)} months empty, {rBase.occupancyMonths.toFixed(0)} lived in. Only the empty months carry a vacant house.</>
-              : <>A 30-day slip costs roughly {money0(rBase.holdMonthly + rBase.interest / Math.max(1, rBase.holdMonths))}.</>} />
-          </>}
-
-          <Band span={5} {...fold('acq')} tag={money0(rBase.acqTotal)}>Acquisition costs</Band>
-          {secOpen('acq') && <>
-          <R label="Seller provided disclosure package"
-            note="California sellers normally deliver TDS, SPQ, NHD and the pest, home and roof reports before offers. Switching this on zeroes the lines it covers." ctl={
-            <Switch checked={s.sellerDisclosure} onChange={v => set('sellerDisclosure', v)} />} />
-          <R label="Buy-side commission" unit="%" amount={money0(amt(rBase.acqLines, 'buySideComm'))}
-            note="What you pay a buyer's agent to acquire. If you represent yourself it is income, not a cost.">
-            <Num value={s.buySideCommPct} onChange={v => set('buySideCommPct', v)} /></R>
-          {ACQ_ITEMS.map(i => {
-            /* covered by the package: the value you typed is kept, shown struck
-               through, and excluded from the total until you switch it off */
-            const covered = s.sellerDisclosure && SELLER_PROVIDED.has(i.id);
-            return (
-              <R key={i.id} label={<>{i.label}{covered && <span className="cov">seller</span>}</>}
-                note={i.note} amount={covered ? money0(0) : money0(s.acq[i.id] ?? 0)}>
-                <NumInput value={s.acq[i.id] ?? 0} disabled={covered}
-                  className={covered ? 'covered' : ''}
-                  onChange={v => setMap('acq', i.id, v)} /></R>
-            );
-          })}
-          {rBase.acqLines.filter(l => l.derived && l.id !== 'buySideComm' && l.amount !== 0).map((l, i) => (
-            <V key={i} label={l.label} value={money0(l.amount)} unit="auto"
-              note="Computed from the city preset and who pays." />
-          ))}
-          <V cls="tot" label="Total acquisition" value={money0(rBase.acqTotal)}
-            unit={pct(s.price > 0 ? rBase.acqTotal / s.price * 100 : 0)}
-            note="Loan points are not here — they live under Financing." />
-          </>}
-
-          <Band span={5} {...fold('hold')}
-            tag={`${money0(rBase.holdTotal)}${s.liveIn ? ' · live-in' : ` · ${money0(rBase.holdMonthly)}/mo`}`}>Holding costs</Band>
-          {secOpen('hold') && <>
-          <R label="Live-in flip"
-            hint={s.liveIn ? `${rBase.occupancyMonths.toFixed(0)} months occupied` : undefined}
-            note="You move in, hold past two years, then sell. The months you live there are not vacant, so an empty house's costs never happen — and the housing you would have paid for anyway is not a cost of the deal." ctl={
-            <Switch checked={s.liveIn} onChange={v => set('liveIn', v)} />} />
-          {s.liveIn && (
-            <R label="Housing you would have paid anyway" unit="$/mo"
-              amount={money0(s.avoidedHousing * rBase.occupancyMonths)}
-              note={<>Rent on the place you would otherwise live. {money0(rBase.housingCredit)} of it is credited back, capped at what those months actually cost you.</>}>
-              <Money value={s.avoidedHousing} onChange={v => set('avoidedHousing', v)} /></R>
+          {s.liveIn && s.finMode === 'hard' && (
+            <Note tone="warn" icon="warning" title={`Hard money does not stretch to ${holdLabel(rBase.holdMonths)}`}>
+              A bridge loan at {s.hardRate}% is priced for months, and most lenders will not extend one past 18.
+              Living there makes you owner-occupied, which prices below an investment loan.
+              <Button variant="outline" size="sm" className="mt-2 flex" onClick={() => set('finMode', 'conv')}>Switch to conventional</Button>
+            </Note>
           )}
-          <R label="Levied property tax rate" unit="%" amount={money0(rBase.propertyTax)}
-            note="1% Prop 13 base plus local bonds. A published “effective rate” understates this by a third.">
-            <Num value={s.taxRatePct} onChange={v => set('taxRatePct', v)} /></R>
-          <R label="Prior assessed value" amount={rBase.supplementalTax > 0 ? money0(rBase.supplementalTax) : undefined}
-            note="From the county assessor. Only used to break out the supplemental bill.">
-            <Money value={s.priorAssessed} onChange={v => set('priorAssessed', v)} /></R>
-          <R label="Builder's risk insurance" amount={money0(amt(rBase.holdLines, 'builderRisk'))}
-            note="Covers the structure while it is open. 1–3% of rehab, or $150–300/mo." ctl={
-            <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 3 }}>
-              <NumInput fmt="raw" small value={s.builderRisk} onChange={v => set('builderRisk', v)} />
-              <UnitToggle options={[{ u: '$', label: '$/mo' }, { u: '%', label: '% rehab' }]}
-                value={s.builderRiskUnit} onChange={u => set('builderRiskUnit', u as '$' | '%')} />
-            </div>} />
-          <Sec span={5}>Monthly operating — enter $/mo, total over the hold at right</Sec>
-          {HOLD_ITEMS.map(i => (
-            <R key={i.id} label={i.label} unit="$/mo"
-              note={s.liveIn && i.vacantOnly
-                ? <>Empty months only — nobody is living there to need it. {i.note}</>
-                : i.note}
-              amount={money0(amt(rBase.holdLines, i.id))}>
-              <Money value={s.hold[i.id] ?? 0} onChange={v => setMap('hold', i.id, v)} /></R>
-          ))}
-          {rBase.housingCredit > 0 && (() => {
-            /* only the share that lands in THIS table, so the column adds up —
-               the rest offsets interest and is shown under Financing */
-            const here = Math.abs(amt(rBase.holdLines, 'housingCredit'));
-            const elsewhere = rBase.housingCredit - here;
-            return (
-              <V label="Housing you would have paid for anyway" value={`(${money0(here)})`}
-                note={elsewhere > 0
-                  ? <>Covers this carry in full. The other {money0(elsewhere)} offsets interest, under Financing.</>
-                  : <>{rBase.occupancyMonths.toFixed(0)} months at {money0(s.avoidedHousing)}/mo.</>} />
-            );
-          })()}
-          <V cls="tot" label={`Total over ${rBase.holdMonths.toFixed(1)} months`} value={money0(rBase.holdTotal)}
-            note={<>{pct(s.arv.base > 0 ? rBase.holdTotal / s.arv.base * 100 : 0)} of ARV. Runs whether or not anyone is working on the house.</>} />
-          </>}
 
-          <Band span={5} {...fold('sell')} tag={`${money0(rBase.sellTotal)} · ${pct(rBase.sellPctOfSale)} of sale`}>Selling costs</Band>
-          {secOpen('sell') && <>
-          <G>All-in Bay Area selling costs run <b>7–9% of sale price</b>. Yours are {pct(rBase.sellPctOfSale)} — {sellVerdict}. If you list it yourself, that commission is income to you, not a cost.</G>
-          <R label="Listing commission" unit="%" amount={money0(amt(rBase.sellLines, 'listComm'))}
-            note="2.5% standard. Your own listing side is income, not an expense.">
-            <Num value={s.listCommPct} onChange={v => set('listCommPct', v)} /></R>
-          <R label="Buyer agent commission" unit="%" amount={money0(amt(rBase.sellLines, 'buyerComm'))}
-            note="Negotiable since the NAR settlement, but 2.5% still gets it shown.">
-            <Num value={s.buyerCommPct} onChange={v => set('buyerCommPct', v)} /></R>
-          <R label="City transfer tax paid by" amount={money0(amt(rBase.sellLines, 'sellCityTax') + amt(rBase.sellLines, 'sellCountyTax'))}
-            note={city ? `${city.name} custom pre-filled — on a large bill this is negotiable.`
-                       : 'Local custom varies. Pick a city above to pre-fill it.'} ctl={
-            <UnitToggle
-              options={[{ u: 'seller', label: 'Seller' }, { u: 'split', label: 'Split' }, { u: 'buyer', label: 'Buyer' }]}
-              value={s.transferPayer}
-              onChange={u => set('transferPayer', u as FlipState['transferPayer'])} />} />
-          {SELL_FLAT_ITEMS.map(i => (
-            <R key={i.id} label={i.label} note={i.note} amount={money0(s.sell[i.id] ?? 0)}>
-              <Money value={s.sell[i.id] ?? 0} onChange={v => setMap('sell', i.id, v)} /></R>
-          ))}
-          <R label="Staging — per month" unit="$/mo" amount={money0(amt(rBase.sellLines, 'stagingHold'))}
-            note="$1–1.5k/mo through days on market plus escrow.">
-            <Money value={s.stagingMo} onChange={v => set('stagingMo', v)} /></R>
-          <R label="Retrofit compliance" amount={money0(s.retrofit)}
-            note={city ? `Required in ${city.name}: ${city.retrofit.map(x => x.label).join(', ')}.`
-                       : 'Lateral certificate, water heater strapping, alarms — varies by city.'}>
-            <Money value={s.retrofit} onChange={v => set('retrofit', v)} /></R>
-          <R label="Seller concessions" unit="%" amount={money0(amt(rBase.sellLines, 'concessions'))}
-            note="Credits after the buyer’s inspection. 0.5% is light; 1% safer on an older house.">
-            <Num value={s.concessionsPct} onChange={v => set('concessionsPct', v)} /></R>
-          <R label="CA 3.33% withholding" amount={rBase.withholding > 0 ? money0(rBase.withholding) : undefined}
-            note="Escrow withholds it at close and credits it on your return. Moves cash timing, never profit." ctl={
-            <Switch checked={s.withholdingOn} onChange={v => set('withholdingOn', v)} />} />
-          <V cls="tot" label="Total selling costs" value={money0(rBase.sellTotal)} unit={pct(rBase.sellPctOfSale)}
-            note="Recomputed per ARV scenario — most of these are percentages of sale." />
-          </>}
-
-          <Band span={5} {...fold('fin')} tag={`${money0(rBase.finTotal)} · ${s.finMode === 'hard' ? 'hard money' : s.finMode === 'cash' ? 'all cash' : 'conventional'}`}>Financing</Band>
-          {secOpen('fin') && <>
-          <G>Hard money funds the rehab in draws; conventional funds only the purchase; all cash ties up every dollar but pays no interest at all.</G>
-          <R label="Instrument" note="Switching swaps the input set rather than reinterpreting it." ctl={
-            <UnitToggle options={[{ u: 'hard', label: 'Hard money' }, { u: 'conv', label: 'Conventional' }, { u: 'cash', label: 'All cash' }]}
-              value={s.finMode} onChange={u => set('finMode', u as FlipState['finMode'])} />} />
-          {s.finMode === 'hard' && <>
-            <R label="Loan-to-cost on purchase" unit="%" amount={money0(rBase.loanAtClose)}
-              note="Bay Area hard money runs 85–90% of purchase.">
-              <Num value={s.ltcPct} onChange={v => set('ltcPct', v)} /></R>
-            <R label="Rehab financed" unit="%" amount={money0(rBase.rehabTotal - rBase.cashForRehab)}
-              note="Usually 100%, released in draws as work is inspected.">
-              <Num value={s.rehabFinancedPct} onChange={v => set('rehabFinancedPct', v)} /></R>
-            <R label="Interest rate" unit="%" amount={money0(rBase.interest)}
-              note="9.5–12% in 2026. Interest-only on the drawn balance.">
-              <Num value={s.hardRate} onChange={v => set('hardRate', v)} /></R>
-            <R label="Points" unit="%" amount={money0(amt(rBase.finLines, 'points'))}
-              note="1.5–3 points at close on purchase loan plus rehab holdback.">
-              <Num value={s.pointsPct} onChange={v => set('pointsPct', v)} /></R>
-            <R label="Lender fees" amount={money0(s.hardFees)} note="Underwriting, doc prep, legal. $1–2k typical.">
-              <Money value={s.hardFees} onChange={v => set('hardFees', v)} /></R>
-            <R label="Draws / fee each" amount={money0(amt(rBase.finLines, 'drawFees'))}
-              note="$250–500 each plus an inspection delay. Fewer, larger draws cost less." ctl={
-              <div className="inline-input" style={{ justifyContent: 'flex-end', gap: 3 }}>
-                <NumInput fmt="raw" small value={s.drawCount} onChange={v => set('drawCount', v)} />
-                <NumInput small value={s.drawFee} onChange={v => set('drawFee', v)} />
-              </div>} />
-            <R label="Minimum interest" unit="mo" note="Most lenders guarantee 3–6 months even if you pay off early.">
-              <Num value={s.minInterestMonths} onChange={v => set('minInterestMonths', v)} /></R>
-            <R label="Extension fee" unit="%" amount={money0(amt(rBase.finLines, 'extension'))}
-              note="Charged when the overrun above is more than zero. 0.5–1 point.">
-              <Num value={s.extensionFeePct} onChange={v => set('extensionFeePct', v)} /></R>
-          </>}
-          {s.finMode === 'conv' && <>
-            <R label="Loan-to-value on purchase" unit="%" amount={money0(rBase.loanAtClose)}
-              note="Against purchase price, not total cost. A conventional loan funds no rehab.">
-              <Num value={s.ltvPct} onChange={v => set('ltvPct', v)} /></R>
-            <R label="Interest rate" unit="%" amount={money0(rBase.interest)}
-              note="Investment property prices 50–75bp over owner-occupied.">
-              <Num value={s.convRate} onChange={v => set('convRate', v)} /></R>
-            <R label="Term" unit="yrs" note="Sets the payment. Paid off at sale regardless.">
-              <Num value={s.convTerm} onChange={v => set('convTerm', v)} /></R>
-            <R label="Interest only" note="Take it on a flip — amortising parks cash in principal you get back anyway." ctl={
-              <Switch checked={s.convIO} onChange={v => set('convIO', v)} />} />
-            <R label="Origination" unit="%" amount={money0(amt(rBase.finLines, 'origination'))}
-              note="On the loan amount only. No rehab commitment to charge against.">
-              <Num value={s.originationPct} onChange={v => set('originationPct', v)} /></R>
-            <R label="Lender fees" amount={money0(s.convFees)} note="Underwriting, appraisal review, doc prep.">
-              <Money value={s.convFees} onChange={v => set('convFees', v)} /></R>
-            <R label="Prepayment penalty" unit="%" amount={money0(amt(rBase.finLines, 'prepay'))}
-              note="Some investor products carry one; a flip pays off inside the window.">
-              <Num value={s.prepayPct} onChange={v => set('prepayPct', v)} /></R>
-          </>}
-          {s.finMode === 'cash' &&
-            <V label="No loan, no lender, no interest" value={money0(0)}
-              note="Every dollar of purchase and rehab is yours, which is why peak cash below equals the whole deal." />}
-          <V cls="tot" label="Total financing cost" value={money0(rBase.finTotal)}
-            note={s.finMode === 'cash' ? 'Nothing to pay a lender.'
-              : `${pct(s.arv.base > 0 ? rBase.finTotal / s.arv.base * 100 : 0)} of ARV — after rehab, usually the second-largest cost.`} />
-          <V label="Loan at close" value={money0(rBase.loanAtClose)} note="Funded at close, before any rehab draw." />
-          <V label="Down payment" value={money0(rBase.downPayment)} note="Purchase price less the loan." />
-          <V label="Cash needed for rehab" value={money0(rBase.cashForRehab)}
-            note={s.finMode === 'hard' ? 'Only the unfinanced share; the lender reimburses the rest by draw.'
-                                       : 'The whole rehab — no lender is funding any of it.'} />
-          <V cls="grand" label="Peak cash out of pocket" value={money0(rBase.peakCash)}
-            note="The number that decides whether you can do this deal at all." />
-          </>}
-
-        </tbody></table></div>
-
-        {diverged && (
-          <div className="notice warn" style={{ marginTop: 12 }}>
-            <div><b>Checklist and budget have diverged</b>
-Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.base)}.</div>
-            <div className="act">
-              <button onClick={pushSow}>Re-sync</button>
-              <button onClick={() => set('rehabSource', 'manual')}>Keep mine</button>
-            </div>
-          </div>
-        )}
-        {sow.checkedCount > 0 && s.rehabSource === 'manual' && (
-          <div className="notice" style={{ marginTop: 12 }}>
-            <div><b>{sow.checkedCount} tasks scoped on the Scope of Work</b>
-              They total {money0(sow.total)}.</div>
-            <div className="act"><button onClick={pushSow}>Use these</button></div>
-          </div>
-        )}
-      </section>
-
-      {/* ============================================ TAB 2 — DEAL MODEL */}
-      <section className={`pane${tab === 'model' ? ' on' : ''}`}>
-        <div className={`verdict ${verdict.v}`}>
-          <span className="dot" />
-          <div><div className="v-title">{verdict.title}</div><div className="v-sub">{verdict.sub}</div></div>
-        </div>
-
-        <div className="sumry">
-          <div className="hero"><div className="k">Max offer</div>
-            <div className="v">{money0(mao)}</div>
-            <div className="s">for {money0(s.minProfit)} profit</div></div>
-          <div><div className="k">Net profit</div>
-            <div className={`v ${rBase.profit < 0 ? 'neg' : rBase.profit < s.minProfit ? 'warn' : 'pos'}`}>{money(rBase.profit)}</div>
-            <div className="s">{pct(rBase.margin)} of ARV</div></div>
-          <div><div className="k">Profit floor</div><div className="v">{money0(s.minProfit)}</div>
-            <div className="s">{rBase.profit >= s.minProfit
-              ? `${money0(rBase.profit - s.minProfit)} of headroom`
-              : `${money0(s.minProfit - rBase.profit)} short`}</div></div>
-          <div><div className="k">ROI on cash</div><div className="v">{pct(rBase.roi)}</div>
-            <div className="s">{money0(rBase.peakCash)} invested</div></div>
-          <div><div className="k">Annualized</div><div className="v">{pct(rBase.annualizedRoi)}</div>
-            <div className="s">{holdLabel(rBase.holdMonths)} hold</div></div>
-        </div>
-
-        <div className="sheet"><table className="ss with-notes">
-          <colgroup>
-            <col className="c-lb" /><col className="c-n" /><col className="c-u" />
-            <col className="c-amt" /><col className="c-note" />
-          </colgroup>
-          <tbody>
-          <Band span={5} tag={money0(s.minProfit)}>Profit floor</Band>
-          <R label="Minimum profit" hint="the walk-away number" amount={money0(s.minProfit)}
-            note="What the deal has to clear for you to do it. Sets the verdict above, the max offer, and where the grid below turns green.">
-            <Money value={s.minProfit} onChange={v => set('minProfit', v)} /></R>
-        </tbody></table></div>
-
-        <div className="notice"><div>{seventyRule(s) < mao
-          ? `The 70% rule is stricter than your own numbers by ${money0(mao - seventyRule(s))}. It assumes financing and selling costs that Bay Area price points don't match, so trust your MAO.`
-          : `The 70% rule is looser than your own numbers by ${money0(seventyRule(s) - mao)}. Your underwrite says pay less than the rule of thumb — trust the underwrite.`}</div></div>
-
-        {/* The 3x3 scenario table and the sensitivity grid were the same
-            question asked twice, so only the grid survives. */}
-        <div className="sheet">
-          <table className="ss"><tbody>
-            <Band span={4} tag="ARV across · rehab down">Net profit</Band>
-          </tbody></table>
-          <div style={{ padding: '10px 12px 12px' }}>
-            <div className="hm-wrap">
-              <table className="hm">
+          <Panel title="Net profit by ARV and rehab" tag="ARV across · rehab down">
+            <div className="overflow-x-auto py-1">
+              <table className="w-full min-w-[560px] border-separate border-spacing-[2px] text-center text-[0.8125rem] tabular-nums">
                 <thead><tr>
-                  <th className="corner">Rehab ↓ &nbsp; ARV →</th>
+                  <th className="px-1 pb-1 text-left text-xs font-semibold text-muted-foreground">Rehab ↓ · ARV →</th>
                   {sens.arvAxis.map((a, i) => (
-                    <th key={i}>{money0(a)}<span className="sub">{psf(a, sqft)}</span></th>
+                    <th key={i} scope="col" className="px-1 pb-1 font-semibold text-ink-strong">{compact(a)}
+                      <span className="block text-[0.6875rem] font-normal text-muted-foreground">{psf(a, sqft)}</span></th>
                   ))}
                 </tr></thead>
                 <tbody>
@@ -859,11 +645,11 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
                     const baseA = nearest(sens.arvAxis, sens.baseArv);
                     return (
                       <tr key={ri}>
-                        <th className="rh">{money0(sens.rehabAxis[ri])}
-                          <span className="sub">{psf(sens.rehabAxis[ri], sqft)}</span></th>
+                        <th scope="row" className="whitespace-nowrap px-1 text-left font-semibold text-ink-strong">{compact(sens.rehabAxis[ri])}
+                          <span className="ml-1 text-[0.6875rem] font-normal text-muted-foreground">{psf(sens.rehabAxis[ri], sqft)}</span></th>
                         {row.map((v, ci) => (
                           <td key={ci} style={heatColor(v, s.minProfit, sens.min, sens.max)}
-                            className={ri === baseR && ci === baseA ? 'base-cell' : ''}
+                            className={cn('rounded-[4px] px-1 py-1.5 font-semibold', ri === baseR && ci === baseA && 'outline outline-2 -outline-offset-2 outline-ink-strong')}
                             title={`ARV ${money0(sens.arvAxis[ci])} · rehab ${money0(sens.rehabAxis[ri])} → ${money(v)}`}>
                             {compact(v)}
                           </td>
@@ -874,210 +660,67 @@ Scope of work totals {money0(sow.total)}; this deal's base is {money0(s.rehab.ba
                 </tbody>
               </table>
             </div>
-            <div className="hm-legend">
-              <span className="k"><i className="sw" style={{ background: `rgb(${LOSS_1.join(',')})` }} />Loses money</span>
-              <span className="k"><i className="sw" style={{ background: `rgb(${WARN_1.join(',')})` }} />Under your {money0(s.minProfit)} floor</span>
-              <span className="k"><i className="sw" style={{ background: `rgb(${GOOD_1.join(',')})` }} />Clears the floor</span>
-              <span className="k"><i className="box" />Your budget at base ARV</span>
+            <ul className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.8125rem] text-[#3a4352]">
+              <li className="flex items-center gap-1.5"><span className="size-2.5 rounded-[2px]" style={{ background: `rgb(${LOSS_1.join(',')})` }} />Loses money</li>
+              <li className="flex items-center gap-1.5"><span className="size-2.5 rounded-[2px]" style={{ background: `rgb(${WARN_1.join(',')})` }} />Under your {money0(s.minProfit)} floor</li>
+              <li className="flex items-center gap-1.5"><span className="size-2.5 rounded-[2px]" style={{ background: `rgb(${GOOD_1.join(',')})` }} />Clears the floor</li>
+              <li className="flex items-center gap-1.5"><span className="size-2.5 rounded-[2px] outline outline-2 -outline-offset-1 outline-ink-strong" />Your base case</li>
+              <li><InfoTip label="About this grid">Axes span your low-to-high ARV and rehab with 10% headroom past each end. Purchase price ({money0(s.price)}), timeline ({holdLabel(rBase.holdMonths)}) and financing are held fixed.{city && city.tiers.length > 1 ? ' This city has a transfer tax cliff, so expect a step wherever the ARV range crosses it.' : ''}</InfoTip></li>
+            </ul>
+          </Panel>
+
+          <Panel title="Deal model" tag={`rehab ${money0(rBase.rehabTotal)}`}>
+            <div className="-mx-1 overflow-x-auto">
+              <table className="w-full min-w-[520px] text-sm">
+                <thead>
+                  <tr className="border-b border-line text-xs text-muted-foreground">
+                    <th className="px-3 py-1.5 text-left font-bold uppercase tracking-[0.08em]">Scenario</th>
+                    {SCENARIO_KEYS.map((k, i) => (
+                      <th key={k} scope="col" className={cn(cell, 'font-bold', onCol(i))}>
+                        <span className="block uppercase tracking-[0.08em]">ARV {k}</span>{money0(s.arv[k])}</th>
+                    ))}
+                    <th scope="col" className={cn(cell, 'font-bold uppercase tracking-[0.08em]')}>% of sale</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {head('Sale proceeds')}
+                  {pl('Sale price (ARV)', r => r.sale, { fmt: money0 })}
+                  {group('sell', 'Less selling costs', r => r.sellTotal, cols[selIdx].sellLines)}
+                  {pl('Net sale proceeds', r => r.netProceeds, { fmt: money0, kind: 'tot' })}
+
+                  {head('Cost into the deal')}
+                  {pl('Purchase price', () => s.price)}
+                  {group('acq', 'Acquisition costs', r => r.acqTotal, cols[selIdx].acqLines)}
+                  {pl('Rehab budget', r => r.rehabTotal)}
+                  {group('hold', 'Holding costs', r => r.holdTotal, cols[selIdx].holdLines)}
+                  {group('fin', 'Financing cost', r => r.finTotal, cols[selIdx].finLines)}
+                  {pl('Net profit / (loss)', r => r.profit, { fmt: money, kind: 'grand' })}
+
+                  {head('Returns')}
+                  {pl('Return on cash', r => r.roi, { fmt: pct, share: false })}
+                  {pl('Annualized return', r => r.annualizedRoi, { fmt: pct, share: false })}
+                  {pl('Margin, % of ARV', r => r.margin, { fmt: pct, share: false })}
+
+                  {head('Capital')}
+                  {pl('Cash to close', r => r.cashToClose, { fmt: money0, share: false })}
+                  {pl('Cash during hold', r => r.cashDuringHold, { fmt: money0, share: false })}
+                  {pl('Peak cash out of pocket', r => r.peakCash, { fmt: money0, share: false, kind: 'tot' })}
+                  {pl('Loan payoff at sale', r => r.payoffAtSale, { fmt: money0, share: false })}
+                  {pl('Cash back at close', r => r.cashBackAtClose, { fmt: money, share: false })}
+                  {rBase.principalPaid > 0 && pl('Principal repaid, returns at close', r => r.principalPaid, { fmt: money0, share: false })}
+                  {rBase.withholding > 0 && pl('CA withholding at close', r => r.withholding, { fmt: money0, share: false })}
+                </tbody>
+              </table>
             </div>
-            <p className="footnote">
-              Axes span your low-to-high ARV and rehab scenarios with 10% headroom past each end.
-              Purchase price ({money0(s.price)}), timeline ({holdLabel(rBase.holdMonths)}),
-              and financing are held fixed.
-              {city && city.tiers.length > 1 && ' This city has a transfer tax cliff, so expect a step wherever the ARV range crosses it.'}
-            </p>
-          </div>
+          </Panel>
         </div>
+      </div>
 
-        <div className="sheet scrollx"><table className="ss pl">
-          <thead>
-            <Band span={5} tag={`rehab budget ${money0(rBase.rehabTotal)}`}>Deal model</Band>
-            <tr>
-              <th className="lb">Scenario</th>
-              {SCENARIO_KEYS.map((k, i) => (
-                <th key={k} className={`n${i === selIdx ? ' on' : ''}`}>ARV {k}<br />{money0(s.arv[k])}</th>
-              ))}
-              <th className="sh">% of sale</th>
-            </tr>
-          </thead>
-          <tbody>
-            <Sec span={5}>Scope &amp; timeline</Sec>
-            <PL label="Rehab budget" pick={r => r.rehabTotal} fmt={money0} />
-            <PL label="Total hold period — months" pick={r => r.holdMonths} fmt={n => n.toFixed(1)} share={false} />
-
-            <Sec span={5}>Sale proceeds</Sec>
-            <PL label="Gross sale price (ARV)" pick={r => r.sale} fmt={money0} />
-            <Fold id="sell" label="Less selling costs" pick={r => r.sellTotal} lines={cols[selIdx].sellLines} />
-            <PL cls="tot" label="Net sale proceeds" pick={r => r.netProceeds} fmt={money0} />
-
-            <Sec span={5}>Cost into the deal</Sec>
-            <PL label="Purchase price" pick={() => s.price} />
-            <Fold id="acq" label="Acquisition costs" pick={r => r.acqTotal} lines={cols[selIdx].acqLines} />
-            <PL label="Rehab budget" pick={r => r.rehabTotal} />
-            <Fold id="hold" label="Holding costs" pick={r => r.holdTotal} lines={cols[selIdx].holdLines} />
-            <Fold id="fin" label="Financing cost" pick={r => r.finTotal} lines={cols[selIdx].finLines} />
-
-            <Sec span={5}>Result</Sec>
-            <PL cls="grand" label="Net profit / (loss)" pick={r => r.profit} fmt={money} />
-
-            <Sec span={5}>Returns</Sec>
-            <PL label="Return on cash" pick={r => r.roi} fmt={pct} share={false} />
-            <PL label="Annualized return" pick={r => r.annualizedRoi} fmt={pct} share={false} />
-            <PL label="Margin — % of ARV" pick={r => r.margin} fmt={pct} share={false} />
-
-            <Sec span={5}>Capital</Sec>
-            <PL label="Cash to close" pick={r => r.cashToClose} fmt={money0} share={false} />
-            <PL label="Cash during hold" pick={r => r.cashDuringHold} fmt={money0} share={false} />
-            <PL cls="tot" label="Peak cash out of pocket" pick={r => r.peakCash} fmt={money0} share={false} />
-            <PL label="Loan payoff at sale" pick={r => r.payoffAtSale} fmt={money0} share={false} />
-            <PL label="Cash back at close" pick={r => r.cashBackAtClose} fmt={money} share={false} />
-            {rBase.principalPaid > 0 &&
-              <PL label="Principal repaid — returns at close" pick={r => r.principalPaid} fmt={money0} share={false} />}
-            {rBase.withholding > 0 &&
-              <PL label="CA withholding at close" pick={r => r.withholding} fmt={money0} share={false} />}
-          </tbody>
-        </table></div>
-      </section>
-
-      {/* ============================================ TAB 4 — SCOPE OF WORK */}
-      <section className={`pane${tab === 'sow' ? ' on' : ''}`}>
-        <div className="sumry four">
-          <div className="hero"><div className="k">Rehab estimate</div>
-            <div className="v">{money0(sow.total)}</div>
-            <div className="s">{psf(sow.total, sqft)}</div></div>
-          <div><div className="k">Tasks scoped</div><div className="v">{sow.checkedCount}</div>
-            <div className="s">across {spaces.length} spaces</div></div>
-          <div><div className="k">Not yet scoped</div>
-            <div className={`v ${sow.emptySpaces.length ? 'warn' : 'pos'}`}>{sow.emptySpaces.length}</div>
-            <div className="s">{sow.emptySpaces.length ? 'spaces untouched' : 'every space decided'}</div></div>
-          <div><div className="k">Often missed</div>
-            <div className={`v ${sow.missedUnchecked.length ? 'warn' : 'pos'}`}>{sow.missedUnchecked.length}</div>
-            <div className="s">{sow.missedUnchecked.length ? 'still unscoped' : 'all accounted for'}</div></div>
-        </div>
-
-        <div className="sow-bar">
-          <button className="btn" onClick={() => setOpenSecs(
-            Object.fromEntries(spaces.map(sp => [sp.id, !allOpen])))}>
-            {allOpen ? 'Collapse all' : 'Expand all'}</button>
-          <button className="btn ghost" onClick={() => {
-            if (confirm('Clear every scoped task?'))
-              setS(p => ({ ...p, checked: {}, spaceLevel: {} }));
-          }}>Clear all</button>
-        </div>
-
-        {sow.emptySpaces.length > 0 && (
-          <div className="notice warn">
-            <div><b>{sow.emptySpaces.length} spaces have nothing scoped</b>
-              {sow.emptySpaces.slice(0, 8).join(' · ')}{sow.emptySpaces.length > 8 ? ' …' : ''}.
-              Set each to Skip once you have decided it genuinely needs nothing — forgetting a space is
-              the single biggest source of a blown rehab budget.</div>
-          </div>
-        )}
-        {sow.missedUnchecked.length > 0 && (
-          <div className="notice">
-            <div><b>Commonly missed and not yet scoped</b>
-              {sow.missedUnchecked.slice(0, 6).map(m => `${m.desc} (${m.space})`).join(' · ')}
-              {sow.missedUnchecked.length > 6 ? ` · and ${sow.missedUnchecked.length - 6} more` : ''}.
-              These are the lines that turn up after demolition rather than before an offer.</div>
-          </div>
-        )}
-
-        <div className="sheet"><table className="ss"><tbody>
-          <Band tag="drives every room below">Property</Band>
-          <R label="Square feet"><Money value={sqft} onChange={v => setProp('sqft', v)} /></R>
-          <R label="Bedrooms" ctl={<Count value={s.prop.beds} onChange={v => setProp('beds', v)} max={10} />} />
-          <R label="Full baths" ctl={<Count value={s.prop.baths} onChange={v => setProp('baths', v)} max={10} />} />
-          <R label="Half baths" ctl={<Count value={s.prop.halfBaths} onChange={v => setProp('halfBaths', v)} max={5} />} />
-          <R label="Stories" ctl={<Count value={s.prop.stories} onChange={v => setProp('stories', v)} max={4} from={1} />} />
-          <R label="Garage bays" ctl={<Count value={s.prop.garageBays} onChange={v => setProp('garageBays', v)} max={4} />} />
-        </tbody></table></div>
-
-        {spaces.map(sp => {
-          const def = DEF_BY_KIND[sp.kind];
-          const tot = sow.spaces.find(x => x.id === sp.id)!;
-          const open = !!openSecs[sp.id];
-          const lvl = s.spaceLevel[sp.id];
-          return (
-            <div className={`sp${open ? ' open' : ''}${tot.count === 0 ? ' empty' : ''}`} key={sp.id}>
-              <div className="sp-head" onClick={() => setOpenSecs(p => ({ ...p, [sp.id]: !p[sp.id] }))}>
-                <span className="chev">▶</span>
-                <span className="nm">{sp.label}</span>
-                {sp.room && (
-                  <span className="sz" onClick={ev => ev.stopPropagation()}>
-                    <input value={sp.sqft} inputMode="numeric"
-                      onChange={ev => setS(p => ({ ...p, spaceSqft: { ...p.spaceSqft, [sp.id]: parseNum(ev.target.value) } }))} /> sf
-                  </span>
-                )}
-                <span className="lv" onClick={ev => ev.stopPropagation()}>
-                  {LEVEL_LABELS.map(l => (
-                    <button key={l.v} title={l.hint}
-                      className={`${lvl === l.v ? 'on' : ''}${l.v === 0 ? ' skip' : ''}`}
-                      onClick={() => setLevel(sp, l.v)}>{l.label}</button>
-                  ))}
-                </span>
-                <span className={`ct${tot.count ? '' : ' zero'}`}>{tot.count} / {tot.taskCount}</span>
-                <span className="amt">{tot.cost > 0 ? money0(tot.cost) : '—'}</span>
-              </div>
-              <div className="sp-body">
-                <div className="sp-head-row">
-                  <span /><span className="l">Task</span><span>Qty</span><span>Est. price</span><span>Cost</span>
-                </div>
-                {def.tasks.map(task => {
-                  const key = taskKey(sp.id, task.id);
-                  const on = !!s.checked[key];
-                  const q = s.qty[key] !== undefined ? s.qty[key] : taskQty(task, sp, propShape);
-                  const price = taskCost(sp.kind, task, catalogPrices);
-                  const line = task.pctOfHard ? sow.hard * price / 100 : q * price;
-                  return (
-                    <div className={`sp-row${on ? ' on' : ''}`} key={task.id}>
-                      <input type="checkbox" checked={on}
-                        onChange={ev => setS(p => ({ ...p, checked: { ...p.checked, [key]: ev.target.checked } }))} />
-                      <div className="d">
-                        {task.desc}<span className="un">{task.pctOfHard ? '% of hard' : task.unit}</span>
-                        {task.missed && <span className="miss">often missed</span>}
-                        {task.note && <span className="nt">{task.note}</span>}
-                      </div>
-                      {task.pctOfHard
-                        ? <div className="dash">—</div>
-                        : <NumInput fmt="raw" value={q}
-                            onChange={v => setS(p => ({ ...p, qty: { ...p.qty, [key]: v } }))} />}
-                      <NumInput fmt="raw" value={price}
-                        className={catalogPrices[priceKey(sp.kind, task.id)] !== undefined ? 'edited' : ''}
-                        onChange={v => setCatalogPrice(priceKey(sp.kind, task.id), v)} />
-                      <div className={`line${on ? '' : ' off'}`}>{on ? money0(line) : '—'}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-
-        <div className="sow-foot">
-          <div className="grp"><span className="lbl">Rehab estimate</span>
-            <span className="val">{money0(sow.total)}<span className="psf">{psf(sow.total, sqft)}</span></span></div>
-          <div className="grp"><span className="lbl">Tasks</span><span className="val">{sow.checkedCount}</span></div>
-          <div className="push">
-            <button className="btn" onClick={printSow} disabled={!sow.checkedCount}><Icon name="print" size={18} />Print scope</button>
-            <button className="btn primary" onClick={pushSow} disabled={!sow.checkedCount}>
-              Use as base rehab</button>
-          </div>
-        </div>
-
-        <p className="footnote">
-          Prices are shared across every deal — correct one after a real bid and every future underwrite
-          is right. What this deal owns is which tasks are scoped, each room&apos;s area, and any quantity
-          you override. Pushing sets your <b>base</b> rehab scenario; low and high stay yours, since they
-          are judgement about risk rather than arithmetic.
-        </p>
-      </section>
-
-      <p className="footnote">
-        Screening estimates only — verify every figure locally before making an offer.
-        Transfer tax and property tax presets carry the date they were verified; rates change by ballot
-        measure, so confirm before relying on them. Property tax assumes Prop 13 reassessment to the
-        purchase price. Every profit figure here is before income tax — a flip is ordinary income and
-        also owes self-employment tax, which the <Link href="/tax">Income Tax Calculator</Link> models
+      <p className="mt-4 text-[0.8125rem] leading-snug text-muted-foreground">
+        Screening estimates only. Verify every figure locally before making an offer. Transfer tax and
+        property tax presets change by ballot measure, so confirm them. Property tax assumes Prop 13
+        reassessment to the purchase price. Every profit figure is before income tax: a flip is ordinary
+        income and also owes self-employment tax, which the <Link href="/tax" className="font-semibold text-primary hover:underline">Income Tax Calculator</Link> models
         separately, along with the §121 exclusion a live-in flip is chasing.
       </p>
     </>
