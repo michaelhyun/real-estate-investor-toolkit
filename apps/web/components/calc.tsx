@@ -7,7 +7,7 @@
    The older components/ui.tsx holds the pre-shadcn versions; pages that have
    not been migrated still import from there. */
 
-import { createContext, useContext, useEffect, useId, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
 import { parseNum, fmtMoneyInput } from '@reit/core';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
@@ -91,8 +91,10 @@ export const CONTROL_W = 'w-28';
    from the numeric value on blur. */
 export function NumberField({
   value, onChange, fmt = 'money', suffix, width = CONTROL_W, className,
-  readOnly = false, disabled = false, placeholder, 'aria-label': ariaLabel,
+  readOnly = false, disabled = false, placeholder, 'aria-label': ariaLabel, step, min, max,
 }: {
+  /** With a step, the up and down arrow keys nudge the value by it. */
+  step?: number; min?: number; max?: number;
   value: number; onChange: (n: number) => void; fmt?: 'money' | 'raw';
   /** A unit shown inside the field, e.g. "%" or "yrs". */
   suffix?: string;
@@ -126,12 +128,55 @@ export function NumberField({
         aria-label={ariaLabel}
         aria-labelledby={ariaLabel ? undefined : labelledBy}
         onFocus={() => setFocused(true)}
+        onKeyDown={step ? ev => {
+          if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+          ev.preventDefault();
+          const next = stepTo(parseNum(text), ev.key === 'ArrowUp' ? 1 : -1, step, min, max);
+          setText(format(next)); onChange(next);
+        } : undefined}
         onChange={ev => { setText(ev.target.value); onChange(parseNum(ev.target.value)); }}
         onBlur={() => { setFocused(false); if (text.trim() !== '') setText(format(parseNum(text))); }}
       />
       {suffix ? <span aria-hidden className={cn('pointer-events-none absolute inset-y-0 right-2 flex w-6 items-center justify-end text-[0.8125rem] text-muted-foreground', disabled && 'opacity-50')}>{suffix}</span> : null}
     </span>
   );
+}
+
+/* The next multiple of step above or below v, kept inside min..max. A value
+   typed between steps (6.9) lands on the nearest step in that direction (7). */
+export function stepTo(v: number, dir: 1 | -1, step: number, min = -Infinity, max = Infinity) {
+  const q = v / step, near = Math.round(q);
+  const onStep = Math.abs(q - near) < 1e-6;
+  const next = (onStep ? near + dir : dir > 0 ? Math.ceil(q) : Math.floor(q)) * step;
+  return Math.min(max, Math.max(min, +next.toFixed(6)));
+}
+
+/* ---------- Stepper: minus and plus beside a number field ----------
+   Sits where a unit toggle would, so the field keeps its place in the column.
+   Hold a button to keep stepping. */
+export function Stepper({
+  value, onChange, step, min, max, unit = '',
+}: { value: number; onChange: (n: number) => void; step: number; min?: number; max?: number; unit?: string }) {
+  const cur = useRef(value); cur.current = value;
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stop = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+  useEffect(() => stop, []);
+  const go = (dir: 1 | -1) => { const n = stepTo(cur.current, dir, step, min, max); cur.current = n; onChange(n); };
+  const hold = (dir: 1 | -1) => {
+    stop(); go(dir);
+    const again = (wait: number) => { timer.current = setTimeout(() => { go(dir); again(70); }, wait); };
+    again(380);
+  };
+  const btn = (dir: 1 | -1) => (
+    <button type="button" aria-label={`${dir > 0 ? 'Raise' : 'Lower'} by ${step}${unit}`}
+      disabled={dir > 0 ? max != null && value >= max : min != null && value <= min}
+      onPointerDown={ev => { if (ev.button === 0) hold(dir); }} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop}
+      onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(dir); } }}
+      className="flex size-6 items-center justify-center rounded-full text-muted-foreground hover:bg-card hover:text-primary-deep hover:shadow-[0_1px_2px_rgba(14,20,31,0.12)] disabled:pointer-events-none disabled:opacity-40">
+      <Icon name={dir > 0 ? 'add' : 'remove'} size={16} />
+    </button>
+  );
+  return <span className="flex shrink-0 select-none items-center rounded-full bg-[#eceff3] p-0.5">{btn(-1)}{btn(1)}</span>;
 }
 
 /* ---------- Unit: the suffix after a number field ---------- */

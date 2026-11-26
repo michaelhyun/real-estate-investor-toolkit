@@ -39,13 +39,14 @@ One family, Source Sans 3. Page titles 28px/800 with -0.015em tracking; section 
 - **Stat tiles:** uppercase overline, heavy figure, one muted line under it.
 - **Notices and verdicts:** a tint and a word. Never a coloured stripe down one edge.
 - **Property header:** the address is the page title. Under it, one line of facts with icons (beds, baths, size, year, list price, price per square foot), an Edit details button that opens the fields in a popover, then research links. No row of always-visible inputs.
-- **Charts:** blue (`--primary`) is principal and equity, amber `#b8651a` is interest and cost. One y-axis per chart; two measures on different scales get two charts. A legend plus a hover readout name every series, and a table of the same numbers sits under the chart. `components/AmortizationDialog.tsx` is the reference.
+- **Charts:** blue (`--primary`) is principal and equity, amber `#b8651a` is interest and cost. One y-axis per chart; two measures on different scales get two charts. A legend names every series, pointing at a year opens a small popup with its numbers, and a table of the same numbers sits under the chart. `components/AmortizationCharts.tsx` is the reference and is shared by the Rental dialog and the Mortgage page. `components/PaymentPie.tsx` is the payment ring: fixed colour per part (tax `#9a4bd0`, insurance `#6a9a1f`, PMI `#d6417c`, HOA `#0b93b5`), total in the middle, every amount in the list beside it.
 - **Dialogs:** `components/ui/dialog.tsx`, for a focused look at one thing (the amortization view). Not for routine input.
 - **Focus:** 2px blue outline, 2px offset, everywhere.
 
 ## Migration status
 - On shadcn components: shell, home, Rental Analyzer, and the address search box (shared with Flip).
-- Still on the legacy layer: Mortgage, Flip, Income Tax, Renovation Guide, Portfolio, Login. They import the older `components/ui.tsx`.
+- Mortgage Calculator: on shadcn components (`components/calc.tsx`).
+- Still on the legacy layer: Flip, Income Tax, Renovation Guide, Portfolio, Login. They import the older `components/ui.tsx`.
 
 ## Do's and don'ts
 - Do use shadows, not borders, to separate cards from the page.
