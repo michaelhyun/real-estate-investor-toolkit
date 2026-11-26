@@ -10,10 +10,8 @@ export const TOOLS = [
     desc: 'Scenarios, sensitivity & a room-by-room scope of work' },
   { id: 'tax', icon: 'receipt_long', name: 'Income Tax Calculator', short: 'Income Tax', href: '/tax', group: 'Calculators',
     desc: 'Federal & California, marginal vs effective, capital gains' },
-  { id: 'renovations', icon: 'menu_book', name: 'Renovation Guide', short: 'Renovation Guide', href: '/renovations', group: 'Guides',
-    desc: 'What 50 common Bay Area renovations actually cost' },
   { id: 'portfolio', icon: 'donut_small', name: 'Portfolio ROE Dashboard', short: 'Portfolio', href: '/portfolio', group: 'Portfolio',
     desc: 'Equity, cash flow & return on equity across your rentals' },
 ];
 
-export const GROUPS = ['Calculators', 'Guides', 'Portfolio'];
+export const GROUPS = ['Calculators', 'Portfolio'];

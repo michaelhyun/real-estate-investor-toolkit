@@ -8,7 +8,6 @@ const ANSWERS: Record<string, string> = {
   mortgage: 'Full monthly payment with taxes, insurance and PMI, an amortization schedule, and what extra payments save.',
   flip: 'Bay Area fix-and-flip underwriting: a rehab and ARV scenario grid, profit sensitivity, city transfer tax presets, and a trade-by-trade scope of work.',
   tax: 'Federal and California income tax, marginal against effective rates, and capital gains.',
-  renovations: 'What 50 common renovations cost in the Bay Area: unit prices, whole-job ranges, permit requirements, and what catches people out.',
   portfolio: 'Every rental you own in one view: cash-on-cash, return on equity, a performance leaderboard, and lazy-equity alerts.',
 };
 

@@ -49,7 +49,6 @@ One family, Source Sans 3. Page titles 28px/800 with -0.015em tracking; section 
 - Flip Analyzer: on shadcn components, one two-column page. The Scope of Work tab is off the page; its saved data still round-trips.
 - Income Tax Calculator: on shadcn components, one two-column page. Federal, California and rates are panels on the page. Professional status, pricing a sale, brackets, and thresholds open as dialogs from a row of buttons under the headline figures; reference tables and what-ifs go in dialogs, not at the bottom of the page.
 - **Row notes:** guidance for a row lives behind an info icon (`InfoTip` in `components/calc.tsx`, via the `info` prop on `Field` and `Line`), opened on hover, focus or tap. Panels can fold (`open`/`onOpenChange` on `Panel`) and keep their headline figure in the tag. Keep a note to one or two short sentences; pass `more` (a URL) to add a Learn more link to an official source.
-- Renovation Guide: on shadcn components. One list, a row per renovation, opening to its two notes; a search that matched through the notes opens the row.
 - Portfolio: on shadcn components. The table is also the leaderboard (ranked, top three numbered, a bar in the ROE column); add and edit happen in a dialog built from `Field` rows.
 - Still on the legacy layer: Login only. `components/sheet.tsx` has no importers left, and the old controls in `components/ui.tsx` (`NumInput`, `UnitToggle`, `Switch`, `Card`, `Tile`) are no longer used by any calculator.
 

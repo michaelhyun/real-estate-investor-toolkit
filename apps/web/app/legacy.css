@@ -892,46 +892,6 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 .sow-foot .push { margin-left: auto; display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .sel-city { width: 100%; height: var(--control-height-sm); padding: 0 var(--space-2); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-primary); font-size: var(--fs-base); }
 
-/* ============================================================
-   Renovation Guide
-   ============================================================ */
-.rg-count { font-size: var(--fs-sm); color: var(--text-muted); background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-3); font-variant-numeric: var(--numeric); }
-.rg-intro { max-width: 70ch; font-size: var(--fs-base); color: var(--text-muted); line-height: var(--leading-normal); margin: 0 0 var(--space-4); }
-.rg-intro em { font-style: normal; font-weight: var(--weight-semibold); color: var(--text-secondary); }
-.rg-controls { margin-bottom: var(--space-4); }
-.rg-search { width: 100%; max-width: 520px; height: var(--control-height); font-size: var(--fs-md); padding: 0 var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-primary); margin-bottom: var(--space-2); }
-.rg-search:focus { outline: none; border-color: var(--border-focus); box-shadow: var(--focus-ring); }
-.rg-search::placeholder { color: var(--text-faint); }
-.rg-cats { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.rg-chip { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-height-sm); font-size: var(--fs-base); font-weight: var(--weight-medium); cursor: pointer; padding: 0 var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: var(--bg-surface); color: var(--text-secondary); white-space: nowrap; }
-.rg-chip span { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: var(--numeric); }
-.rg-chip:hover { border-color: var(--brand); color: var(--brand); }
-.rg-chip.on { background: var(--brand); border-color: var(--brand); color: #fff; }
-.rg-chip.on span { color: rgba(255, 255, 255, 0.75); }
-.rg-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: var(--space-3); }
-.rg-card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-3); display: flex; flex-direction: column; }
-.rg-card header { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; margin-bottom: var(--space-2); }
-.rg-cat { font-size: var(--fs-xs); font-weight: var(--weight-semibold); letter-spacing: 0.02em; text-transform: uppercase; color: var(--teal-700); background: var(--brand-tint); border-radius: var(--radius-sm); padding: 2px var(--space-2); }
-.rg-tag { font-size: var(--fs-xs); font-weight: var(--weight-semibold); letter-spacing: 0.02em; text-transform: uppercase; border-radius: var(--radius-sm); padding: 2px var(--space-2); color: var(--text-muted); background: var(--slate-150); }
-.rg-tag.permit-yes { background: var(--cost-tint); color: var(--amber-700); }
-.rg-tag.resale-high { background: var(--gain-tint); color: var(--gain-strong); }
-.rg-tag.resale-low { background: var(--danger-tint); color: var(--red-700); }
-.rg-card h3 { font-size: var(--fs-lg); font-weight: var(--weight-semibold); margin: 0 0 var(--space-2); line-height: var(--leading-snug); }
-.rg-nums { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; margin-bottom: var(--space-2); }
-.rg-nums.two { grid-template-columns: 1.35fr 1fr; }
-.rg-nums > div { padding: var(--space-1) var(--space-2); border-right: 1px solid var(--border-subtle); }
-.rg-nums > div:last-child { border-right: 0; }
-.rg-nums .k { display: block; font-size: var(--fs-xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-muted); }
-.rg-nums .v { display: block; font-size: var(--fs-md); font-weight: var(--weight-semibold); letter-spacing: -0.01em; font-variant-numeric: var(--numeric); }
-.rg-nums .v.small { font-size: var(--fs-base); }
-.rg-nums .s { display: block; font-size: var(--fs-xs); color: var(--text-faint); }
-.rg-note { font-size: var(--fs-base); line-height: var(--leading-snug); color: var(--text-muted); margin: 0 0 var(--space-2); }
-.rg-note:last-child { margin-bottom: 0; }
-.rg-note b { display: block; font-size: var(--fs-xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
-.rg-note.watch { border-left: 2px solid var(--cost); padding-left: var(--space-2); }
-.rg-note.watch b { color: var(--cost); }
-.rg-empty { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-8) var(--space-5); text-align: center; color: var(--text-muted); font-size: var(--fs-md); }
-.rg-reset { font-size: var(--fs-md); font-weight: var(--weight-semibold); color: var(--brand); background: none; border: 0; cursor: pointer; text-decoration: underline; padding: 0 var(--space-1); }
 
 /* ============================================================
    Responsive
@@ -943,7 +903,6 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 
 @media (max-width: 1000px) {
   .rt-tool, .calc-grid, .flip-cols { grid-template-columns: minmax(0, 1fr); }
-  .rg-list { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 1080px) {
@@ -1013,9 +972,6 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
   .notice .act { margin-left: 0; flex-basis: 100%; }
   .sumry, .sumry.four { grid-template-columns: repeat(2, 1fr); }
   .sumry .v { font-size: var(--fs-lg); }
-  .rg-nums, .rg-nums.two { grid-template-columns: 1fr 1fr; }
-  .rg-nums > div:nth-child(2) { border-right: 0; }
-  .rg-nums > div:nth-child(3) { grid-column: 1 / -1; border-top: 1px solid var(--border-subtle); }
   .exit-grid { grid-template-columns: repeat(2, 1fr); }
   .sow-foot .push { margin-left: 0; flex-basis: 100%; }
   .sow-foot .push .btn { flex: 1; }
@@ -1257,25 +1213,4 @@ input[type=range]:focus-visible { outline: 2px solid var(--primary); outline-off
 .lb-place { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: var(--space-2); border-radius: 50%; background: var(--primary-soft); color: var(--primary-deep); font-size: var(--fs-xs); font-weight: var(--weight-bold); font-variant-numeric: var(--numeric); vertical-align: middle; }
 .pt-row .edit { display: inline-grid; place-items: center; }
 
-/* ---------- renovation guide ---------- */
-.rg-count { border: 0; border-radius: var(--radius-pill); box-shadow: var(--shadow-tight); }
-.rg-intro { font-size: var(--fs-md); }
-.rg-search { border-radius: var(--radius-md); }
-.rg-search:focus { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
-.rg-search::placeholder { color: var(--muted-foreground); }
-.rg-cats { gap: var(--space-2); }
-.rg-chip { border: 0; border-radius: var(--radius-pill); background: var(--card); color: var(--text-secondary); font-weight: var(--weight-semibold); box-shadow: var(--shadow-tight); }
-.rg-chip span { color: var(--muted-foreground); }
-.rg-chip:hover { color: var(--primary); }
-.rg-chip.on { background: var(--primary); color: #fff; box-shadow: 0 2px 6px rgba(60, 91, 246, 0.35); }
-.rg-chip.on span { color: rgba(255, 255, 255, 0.85); }
-.rg-card, .rg-empty { border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow-tight); padding: var(--space-4); }
-.rg-card h3 { font-weight: var(--weight-bold); }
-.rg-cat, .rg-tag { letter-spacing: 0.04em; font-weight: var(--weight-bold); }
-.rg-nums { border: 0; border-radius: var(--radius-md); background: var(--page); }
-.rg-nums > div { border-right-color: var(--card); border-right-width: 2px; padding: var(--space-2) var(--space-3); }
-.rg-nums .v { font-weight: var(--weight-bold); color: var(--ink-strong); }
-.rg-nums .s, .rg-note b { color: var(--muted-foreground); }
 /* "Watch out" is a tinted block with a word, not an edge stripe. */
-.rg-note.watch { border-left: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--cost-tint); color: var(--text-secondary); }
-.rg-note.watch b { color: var(--warning-deep); }
