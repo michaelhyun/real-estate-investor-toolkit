@@ -9,7 +9,7 @@
    Two charts rather than one because the balance and a year's payments are on
    very different scales, and one chart never gets two y-axes. They share one
    hovered year: pointing at either marks that year on both, and a small popup
-   beside the pointer gives the year's numbers.
+   beside it gives the year's numbers and the running totals paid so far.
 
    Colours: blue is principal (money that builds equity), amber is interest
    (cost). The pair is checked for colour-blind separation; the legend and the
@@ -59,7 +59,7 @@ export function useWidth<T extends HTMLElement>() {
 
 const M = { top: 8, right: 8, bottom: 22, left: 44 };
 const H = 148;
-const TIP_W = 176;
+const TIP_W = 196;
 
 type Which = 'bal' | 'pay';
 
@@ -74,6 +74,12 @@ export function AmortizationCharts({ years, startBalance }: { years: AmortRow[];
 
   /* the year principal first outweighs interest — where the loan "tips" */
   const tipYear = useMemo(() => years.find(y => y.principal > y.interest)?.year ?? null, [years]);
+
+  /* principal and interest paid from the start through the end of each year */
+  const paid = useMemo(() => {
+    let p = 0, i = 0;
+    return years.map(y => ({ principal: p += y.principal, interest: i += y.interest }));
+  }, [years]);
 
   const iw = Math.max(0, width - M.left - M.right);
   const ih = H - M.top - M.bottom;
@@ -157,17 +163,25 @@ export function AmortizationCharts({ years, startBalance }: { years: AmortRow[];
     const gap = on === 'bal' ? 12 : barW / 2 + 10;
     const right = px + gap + TIP_W <= width;
     const left = right ? px + gap : Math.max(0, px - gap - TIP_W);
-    const top = Math.max(0, Math.min(H - 118, (hover.y ?? 24) - 40));
+    const sofar = paid[hy.year - 1];
+    const sw = (c: string) => <span className="size-2 rounded-[2px]" style={{ background: c }} />;
+    const head = 'col-span-2 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-muted-foreground';
     return (
       <div role="status" aria-live="polite"
         className="pointer-events-none absolute z-10 rounded-md bg-popover px-3 py-2 text-[0.8125rem] leading-snug shadow-fluffy ring-1 ring-line"
-        style={{ left, top, width: TIP_W }}>
+        style={{ left, top: -8, width: TIP_W }}>
         <div className="mb-1 font-bold text-ink-strong">Year {hy.year}</div>
         <dl className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-0.5 tabular-nums">
-          <dt className="flex items-center gap-1.5 text-[#3a4352]"><span className="size-2 rounded-[2px]" style={{ background: PRINCIPAL }} />Principal</dt>
+          <dt className={head}>This year</dt>
+          <dt className="flex items-center gap-1.5 text-[#3a4352]">{sw(PRINCIPAL)}Principal</dt>
           <dd className="text-right font-semibold text-ink-strong">{money0(hy.principal)}</dd>
-          <dt className="flex items-center gap-1.5 text-[#3a4352]"><span className="size-2 rounded-[2px]" style={{ background: INTEREST }} />Interest</dt>
+          <dt className="flex items-center gap-1.5 text-[#3a4352]">{sw(INTEREST)}Interest</dt>
           <dd className="text-right font-semibold text-ink-strong">{money0(hy.interest)}</dd>
+          <dt className={head + ' mt-1 border-t border-line pt-1'}>Paid so far</dt>
+          <dt className="flex items-center gap-1.5 text-[#3a4352]">{sw(PRINCIPAL)}Principal</dt>
+          <dd className="text-right font-semibold text-ink-strong">{money0(sofar.principal)}</dd>
+          <dt className="flex items-center gap-1.5 text-[#3a4352]">{sw(INTEREST)}Interest</dt>
+          <dd className="text-right font-semibold text-ink-strong">{money0(sofar.interest)}</dd>
           <dt className="mt-1 border-t border-line pt-1 text-[#3a4352]">Balance left</dt>
           <dd className="mt-1 border-t border-line pt-1 text-right font-bold text-ink-strong">{money0(hy.balance)}</dd>
         </dl>
