@@ -149,7 +149,7 @@ export default function PortfolioPage() {
       price: d.price, value: d.prop?.list || d.price,
       down: downAmt, other: (d.rehab || 0) + closing,
       loan, rate: d.rate || 0, pay: monthlyPI(loan, d.rate || 0, d.term || 30),
-      income: { v: (d.byRoom ? (d.roomRents || []).reduce((t: number, v: number) => t + (+v || 0), 0) : d.rent) || 0, unit: 'mo' },
+      income: { v: d.rent || 0, unit: 'mo' },
       taxes: { v: d.expenses?.tax || 0, unit: d.units?.tax === 'yr' ? 'yr' : 'mo' },
       ins: { v: d.expenses?.ins || 0, unit: d.units?.ins === 'yr' ? 'yr' : 'mo' },
     });

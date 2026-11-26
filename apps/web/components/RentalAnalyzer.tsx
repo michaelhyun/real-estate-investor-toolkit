@@ -13,7 +13,7 @@ import {
   type DealState,
 } from '@reit/core';
 import { loadJSON, saveJSON, openReportWindow } from './ui';
-import { Panel, Field, Line, SectionLabel, NumberField, Segmented, SliderField, Stepper, Stat, Verdict, Note, Fold, Sub, Toggle, Choice } from './calc';
+import { Panel, Field, Line, SectionLabel, NumberField, Segmented, SliderField, Stat, Verdict, Note, Fold, Sub, Toggle, Choice } from './calc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -59,8 +59,6 @@ function normalizeDeal(d: any): DealState {
       const fallback = e.mode === 'time' ? 'mo' : '$';
       return [e.id, d.units?.[e.id] || fallback];
     })),
-    byRoom: !!d.byRoom,
-    roomRents: Array.isArray(d.roomRents) ? d.roomRents.map((v: any) => +v || 0) : [],
     otherInc: { ...base.otherInc, ...(d.otherInc || {}) },
     utils: { ...base.utils, ...(d.utils || {}) },
     utilUnits: { ...base.utilUnits, ...(d.utilUnits || {}) },
@@ -101,7 +99,7 @@ const RENTCAST_KEY = 'rentcastKey';
    with any other percentage keeps it and shows it as one more choice. */
 const DOWN_CHOICES = [0, 10, 15, 20, 25, 30, 100];   /* 100 is an all-cash purchase */
 
-export function RentalAnalyzer() {
+export function RentalAnalyzer({ modeSwitch }: { modeSwitch?: React.ReactNode }) {
   const [s, setS] = useState<DealState>(defaultDealState);
   const [amortOpen, setAmortOpen] = useState(false);
   const [rcKey, setRcKey] = useState('');
@@ -230,29 +228,6 @@ export function RentalAnalyzer() {
       setFactsBusy(false);
     }
   }
-
-  /* ---------- rent by the room ----------
-     Switching it on starts from the bedroom count in the property details
-     (three if there is none) and splits the current rent evenly, so the deal's
-     numbers do not jump until a room is edited. The single rent figure is
-     kept, and comes back when the option is switched off. */
-  const rooms = s.roomRents || [];
-  const setByRoom = (on: boolean) => setS(prev => {
-    if (!on || (prev.roomRents || []).length) return { ...prev, byRoom: on };
-    const n = Math.min(20, Math.max(1, Math.round(parseNum(prev.prop.beds)) || 3));
-    const total = Math.round(prev.rent || 0), each = Math.floor(total / n);
-    /* any odd dollars go on the first room, so the rooms add up to the rent exactly */
-    return { ...prev, byRoom: true, roomRents: Array.from({ length: n }, (_, i) => each + (i === 0 ? total - each * n : 0)) };
-  });
-  /* a room added takes the last room's rent; rooms are dropped from the end */
-  const setRoomCount = (n: number) => setS(prev => {
-    const cur = prev.roomRents || [];
-    const next = cur.slice(0, n);
-    while (next.length < n) next.push(cur[cur.length - 1] ?? 0);
-    return { ...prev, roomRents: next };
-  });
-  const setRoomRent = (i: number, v: number) =>
-    setS(prev => ({ ...prev, roomRents: (prev.roomRents || []).map((x, j) => j === i ? v : x) }));
 
   const dealTitle = (d: DealState) => d.prop.address?.trim() || d.name || 'Untitled';
 
@@ -453,7 +428,8 @@ export function RentalAnalyzer() {
               </PopoverContent>
             </Popover>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2 print:hidden">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 print:hidden">
+            {modeSwitch}
             <Button variant="outline" onClick={pdf} title="Open a print-ready deal report — choose “Save as PDF” in the print dialog"><Icon name="download" size={18} />PDF</Button>
             <Button onClick={saveDeal}>Save deal</Button>
             <Button variant="ghost" onClick={reset}>Reset</Button>
@@ -681,20 +657,7 @@ export function RentalAnalyzer() {
 
               <Panel title="Monthly Cash Flow" tag="Year 1">
                 <SectionLabel>Income</SectionLabel>
-                {!s.byRoom && <Field label="Gross monthly rent"><NumberField value={s.rent} onChange={v => set('rent', v)} /></Field>}
-                <Field label="Rent by the room" info="For co-living, student housing or any house rented one bedroom at a time. Enter a rent for each bedroom; the total replaces the single rent figure.">
-                  <Toggle checked={!!s.byRoom} onChange={setByRoom} />
-                </Field>
-                {s.byRoom && (
-                  <Sub>
-                    <Field label="Bedrooms"><Stepper value={rooms.length} onChange={setRoomCount} step={1} min={1} max={20} /></Field>
-                    {rooms.map((v, i) => (
-                      <Field key={i} label={`Room ${i + 1}`}><NumberField value={v} onChange={n => setRoomRent(i, n)} /></Field>
-                    ))}
-                    <Line strong label="Gross monthly rent" value={`${money0(r.rent)}/mo`} />
-                    {rooms.length > 0 && <Line indent label="Average per room" value={`${money0(r.rent / rooms.length)}/mo`} />}
-                  </Sub>
-                )}
+                <Field label="Gross monthly rent"><NumberField value={s.rent} onChange={v => set('rent', v)} /></Field>
                 <Fold label="Other income" open={oiOpen} onOpenChange={setOiOpen} summary={`${money0(r.otherIncTotal)}/mo`}>
                   {OTHER_INC.map(k => (
                     <Field key={k} label={OTHER_INC_LABELS[k]}>

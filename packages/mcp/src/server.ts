@@ -52,7 +52,6 @@ server.registerTool('analyze_rental', {
     maintenance_pct: num('Maintenance, percent of rent. Default 8'),
     capex_pct: num('CapEx reserve, percent of rent. Default 8'),
     other_expenses_monthly: num('Any other owner-paid costs per month (utilities, landscaping, pest)'),
-    room_rents: z.array(z.number()).describe('Rent by the room (co-living, student housing): one monthly rent per bedroom. When given, their sum replaces monthly_rent').optional(),
     other_income_monthly: num('Laundry, parking, storage, pet rent per month'),
     rent_growth_pct: num('Rent growth per year. Default 3'),
     expense_growth_pct: num('Expense growth per year. Default 2.5'),
@@ -67,7 +66,6 @@ server.registerTool('analyze_rental', {
 }, async a => {
   const s = defaultDealState();
   s.price = a.price; s.rent = a.monthly_rent;
-  if (a.room_rents?.length) { s.byRoom = true; s.roomRents = a.room_rents; }
   if (a.down_payment_pct != null) s.downPct = a.down_payment_pct;
   if (a.rehab != null) s.rehab = a.rehab;
   if (a.closing_costs != null) { s.closing = a.closing_costs; s.closingUnit = '$'; }
@@ -100,7 +98,7 @@ server.registerTool('analyze_rental', {
       warning: r.overBy > 0 ? `Down payment plus other financing exceeds the price by ${r0(r.overBy)}` : undefined,
     },
     monthly: {
-      rent: r0(r.rent), rooms: s.byRoom ? s.roomRents!.length : undefined, gross_income: r0(r.gross), vacancy_loss: r0(r.vacLoss), effective_income: r0(r.effIncome),
+      gross_income: r0(r.gross), vacancy_loss: r0(r.vacLoss), effective_income: r0(r.effIncome),
       operating_expenses: r0(r.opEx), net_operating_income: r0(r.noi), debt_payment: r0(r.pi), cash_flow: r0(r.cashFlow),
       expense_lines: r.expLines.filter(l => l.monthly).map(l => ({ item: l.label, monthly: r0(l.monthly) })),
     },

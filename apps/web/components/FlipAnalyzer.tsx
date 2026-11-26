@@ -133,7 +133,7 @@ type Tone = 'ok' | 'warn' | 'bad';
 const TONE: Record<Tone, string> = { ok: 'text-success', warn: 'text-warning', bad: 'text-destructive' };
 const say = (tone: Tone, text: string) => <span className={cn('font-semibold', TONE[tone])}>{text}</span>;
 
-export function FlipAnalyzer() {
+export function FlipAnalyzer({ modeSwitch }: { modeSwitch?: React.ReactNode }) {
   const [s, setS] = useState<FlipState>(defaultFlipState);
   const [shut, setShut] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -377,7 +377,8 @@ export function FlipAnalyzer() {
               </PopoverContent>
             </Popover>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2 print:hidden">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 print:hidden">
+            {modeSwitch}
             <Button variant="outline" onClick={report} title="Open a print-ready deal report"><Icon name="download" size={18} />PDF</Button>
             <Button onClick={saveDeal}>Save deal</Button>
             <Button variant="ghost" onClick={reset}>Reset</Button>

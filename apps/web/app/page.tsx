@@ -4,7 +4,7 @@ import { TOOLS, GROUPS } from '../lib/tools';
 
 /* What each tool answers, in the words of the decision it supports. */
 const ANSWERS: Record<string, string> = {
-  deal: 'Underwrite a rental or a flip on one page. Rental: cash flow, cash-on-cash, DSCR, creative financing, rent by the room and a 5-year pro-forma. Flip: a rehab and ARV scenario grid, profit sensitivity and Bay Area transfer tax presets.',
+  deal: 'Underwrite a rental or a flip on one page. Rental: cash flow, cash-on-cash, DSCR, creative financing and a 5-year pro-forma. Flip: a rehab and ARV scenario grid, profit sensitivity and Bay Area transfer tax presets.',
   mortgage: 'Full monthly payment with taxes, insurance and PMI, an amortization schedule, and what extra payments save.',
   tax: 'Federal and California income tax, marginal against effective rates, and capital gains.',
   portfolio: 'Every rental you own in one view: cash-on-cash, return on equity, a performance leaderboard, and lazy-equity alerts.',
