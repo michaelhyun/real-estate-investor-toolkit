@@ -13,7 +13,7 @@
    while the field has focus, and any failure — offline, blocked, rate-limited —
    is swallowed, leaving an ordinary text input that works exactly as before. */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 const ENDPOINT = 'https://photon.komoot.io/api/';
 const MIN_CHARS = 4;
@@ -60,10 +60,13 @@ function toSuggestion(f: any, i: number): Suggestion | null {
 }
 
 export function AddressInput({
-  value, onChange, placeholder,
+  value, onChange, onPick, placeholder,
 }: {
   value: string;
   onChange: (v: string) => void;
+  /** Called instead of onChange when a suggestion is chosen, so a page can
+      act on a confirmed address (for example, look the property up). */
+  onPick?: (v: string) => void;
   placeholder?: string;
 }) {
   const [items, setItems] = useState<Suggestion[]>([]);
@@ -73,6 +76,7 @@ export function AddressInput({
   const skipNext = useRef(false);          /* don't re-query the text we just inserted */
   const abortRef = useRef<AbortController | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
   useEffect(() => {
     if (!focused) return;
@@ -113,7 +117,7 @@ export function AddressInput({
 
   function choose(s: Suggestion) {
     skipNext.current = true;
-    onChange(s.full);
+    (onPick ?? onChange)(s.full);
     setOpen(false);
     setItems([]);
     setActive(-1);
@@ -133,12 +137,16 @@ export function AddressInput({
   }
 
   return (
-    <div className="addr-wrap" ref={wrapRef}>
+    <div className="relative" ref={wrapRef}>
       <input
-        className="addr-input"
+        className="-ml-2 w-[calc(100%+0.5rem)] truncate rounded-md border border-transparent bg-transparent px-2 py-1 text-[1.75rem] font-extrabold leading-tight tracking-[-0.015em] text-ink-strong outline-none transition-colors placeholder:font-semibold placeholder:text-muted-foreground hover:border-line focus:border-primary focus:bg-card focus:ring-1 focus:ring-primary max-[640px]:text-[1.375rem]"
         type="text"
         value={value}
         placeholder={placeholder}
+        aria-label="Property address"
+        role="combobox"
+        aria-controls={listId}
+        aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
         autoComplete="off"
         spellCheck={false}
         aria-autocomplete="list"
@@ -149,22 +157,24 @@ export function AddressInput({
         onKeyDown={onKeyDown}
       />
       {open && items.length > 0 && (
-        <div className="addr-menu" role="listbox">
+        <div id={listId} role="listbox" aria-label="Suggested addresses"
+          className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-[60vh] min-w-[280px] max-w-[92vw] overflow-auto rounded-lg bg-card p-1.5 shadow-fluffy">
           {items.map((s, i) => (
             <div
               key={s.key}
+              id={`${listId}-${i}`}
               role="option"
               aria-selected={i === active}
-              className={`addr-item${i === active ? ' on' : ''}`}
+              className={`cursor-pointer rounded-md px-2.5 py-2 ${i === active ? 'bg-primary-tint' : ''}`}
               onMouseEnter={() => setActive(i)}
               /* mousedown, not click — it fires before the input blurs */
               onMouseDown={ev => { ev.preventDefault(); choose(s); }}
             >
-              <div className="a1">{s.line1}</div>
-              {s.line2 && <div className="a2">{s.line2}</div>}
+              <div className="text-[0.9375rem] font-semibold text-ink-strong">{s.line1}</div>
+              {s.line2 && <div className="text-[0.8125rem] text-muted-foreground">{s.line2}</div>}
             </div>
           ))}
-          <div className="addr-foot">Addresses from OpenStreetMap · ↑↓ to pick, Esc to dismiss</div>
+          <div className="mt-1 border-t border-line px-2.5 pt-2 pb-1 text-xs text-muted-foreground">Addresses from OpenStreetMap. Arrow keys to pick, Esc to dismiss.</div>
         </div>
       )}
     </div>

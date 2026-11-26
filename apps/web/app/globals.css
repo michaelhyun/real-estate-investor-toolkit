@@ -18,6 +18,11 @@
 @import "shadcn/tailwind.css";
 @import "./legacy.css" layer(legacy);
 
+/* BlueDoor has no dark theme. shadcn components ship `dark:` classes; tying the
+   variant to a .dark class nothing sets keeps them dormant. Without this line
+   Tailwind falls back to the reader's OS setting and half-applies them. */
+@custom-variant dark (&:is(.dark *));
+
 /* ============================================================
    BlueDoor tokens
 

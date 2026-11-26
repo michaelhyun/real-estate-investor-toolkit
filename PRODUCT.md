@@ -19,6 +19,8 @@ A set of calculators for real estate investing: rental analysis, mortgage, fix-a
 
 ## Capabilities and Constraints
 - Bay Area defaults: city transfer-tax presets, local renovation prices, California income tax.
+- The Rental Analyzer is the deal analyzer only (Michael, 2026-11-25): no comps, CapEx, neighborhood or scope-of-work tabs. Its financing section opens an amortization view of the whole loan stack. Down payment is a fixed choice from 0% to 30% in steps of 5 (Michael, 2026-11-25).
+- Property facts (beds, baths, square feet, year built) fill in from RentCast when a suggested address is picked. That needs a RentCast API key, which is kept in the browser's localStorage only, never in a deal or the repo. Address suggestions come from OpenStreetMap (Photon), no key.
 - Results are estimates for screening, not offers. The site says so.
 - Dense inputs are expected: the flip analyzer is laid out as a spreadsheet and must stay that dense.
 

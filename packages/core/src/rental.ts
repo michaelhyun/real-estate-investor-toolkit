@@ -285,3 +285,85 @@ export function compute(s: DealState): DealResult {
     noi, cashFlow, annualCF, coc, dscr, onePct, grm, years, netSale, proceeds, totalProfit, roi5, annualized,
   };
 }
+
+/* ---------- amortization of the whole loan stack ----------
+   Year-by-year interest, principal and remaining balance across every note in
+   the deal: the bank loan (with its interest-only period and ARM adjustment),
+   seller financing and a subject-to mortgage. Uses the same month loop as
+   compute(), run to the end of the longest note instead of stopping at year 5.
+   A note that never amortizes (interest-only for its full term) is paid off as
+   a balloon in its final month. */
+export interface AmortYear { year: number; interest: number; principal: number; balance: number; }
+export interface AmortResult {
+  years: AmortYear[];
+  startBalance: number;
+  totalInterest: number;
+  /* principal paid as lump sums at the end of interest-only notes */
+  balloon: number;
+}
+
+export function amortize(s: DealState): AmortResult {
+  const downAmt = s.price * s.downPct / 100;
+  const sellerAmt = s.sellerOn ? s.sellerAmt : 0;
+  const subtoBal = s.subtoOn ? s.subtoBal : 0;
+  const newLoan = Math.max(0, s.price - downAmt - sellerAmt - subtoBal);
+
+  /* each note as a list of monthly [interest, principal] pairs */
+  type Month = [number, number];
+  let balloon = 0;
+
+  const bank: Month[] = [];
+  if (newLoan > 0) {
+    const termM = Math.round(s.term * 12);
+    const ioEndM = s.ioOn ? Math.round(Math.min((s.ioYears > 0 ? s.ioYears : s.term), s.term) * 12) : 0;
+    const armStartM = s.armOn ? Math.min(Math.round((s.armFixed || 0) * 12), termM) : Infinity;
+    let bal = newLoan, pay = 0;
+    for (let m = 1; m <= termM; m++) {
+      const annual = (s.armOn && m > armStartM) ? s.armRate : s.rate;
+      const rm = annual / 100 / 12;
+      const isIO = m <= ioEndM;
+      if (isIO) pay = bal * rm;
+      else if (m === 1 || m === ioEndM + 1 || m === armStartM + 1)
+        pay = monthlyPI(bal, annual, (termM - m + 1) / 12);
+      const interest = bal * rm;
+      let principal = isIO ? 0 : Math.min(bal, pay - interest);
+      if (m === termM && bal - principal > 0.005) { balloon += bal - principal; principal = bal; }
+      bal -= principal;
+      bank.push([interest, principal]);
+    }
+  }
+
+  const fixedNote = (amount: number, ratePct: number, years: number, interestOnly: boolean): Month[] => {
+    const out: Month[] = [];
+    const n = Math.round(years * 12);
+    if (amount <= 0 || n <= 0) return out;
+    const rm = ratePct / 100 / 12;
+    const pay = interestOnly ? amount * rm : monthlyPI(amount, ratePct, years);
+    let bal = amount;
+    for (let m = 1; m <= n; m++) {
+      const interest = bal * rm;
+      let principal = interestOnly ? 0 : Math.min(bal, pay - interest);
+      if (m === n && bal - principal > 0.005) { if (interestOnly) balloon += bal - principal; principal = bal; }
+      bal -= principal;
+      out.push([interest, principal]);
+    }
+    return out;
+  };
+  const seller = fixedNote(sellerAmt, s.sellerRate, s.sellerTerm, s.sellerType === 'io');
+  const subto = fixedNote(subtoBal, s.subtoRate, s.subtoTerm, false);
+
+  const notes = [bank, seller, subto];
+  const months = Math.max(0, ...notes.map(n => n.length));
+  const startBalance = newLoan + sellerAmt + subtoBal;
+  const years: AmortYear[] = [];
+  let balance = startBalance, totalInterest = 0;
+  for (let y = 1; y <= Math.ceil(months / 12); y++) {
+    let interest = 0, principal = 0;
+    for (let m = (y - 1) * 12; m < Math.min(y * 12, months); m++)
+      for (const n of notes) if (n[m]) { interest += n[m][0]; principal += n[m][1]; }
+    balance = Math.max(0, balance - principal);
+    totalInterest += interest;
+    years.push({ year: y, interest, principal, balance });
+  }
+  return { years, startBalance, totalInterest, balloon };
+}
