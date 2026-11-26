@@ -142,3 +142,14 @@ describe('portfolio anchors', () => {
     expect(m.roe).toBeCloseTo(2000 * 12 / 200000 * 100, 6);
   });
 });
+
+describe('property tax and insurance, yearly', () => {
+  it('default to yearly dollars and accept a yearly percent of the purchase price', () => {
+    const s = defaultDealState();
+    const line = (id: string) => compute(s).expLines.find(l => l.id === id)!.monthly;
+    expect(line('tax')).toBeCloseTo(250, 6);
+    expect(line('ins')).toBeCloseTo(120, 6);
+    s.price = 800000; s.units.tax = '%p'; s.expenses.tax = 1.25;
+    expect(line('tax')).toBeCloseTo(800000 * 0.0125 / 12, 6);
+  });
+});

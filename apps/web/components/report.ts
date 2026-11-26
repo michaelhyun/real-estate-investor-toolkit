@@ -216,6 +216,7 @@ export function buildRentalReport({ s, r, verdict }: ReportInput): string {
   /* ------------------------------------------- monthly operating statement */
   const enteredExp = (unit: string, raw: number) =>
     unit === '%' ? `${stripZeros(pct(raw, 2))} of rent`
+      : unit === '%p' ? `${stripZeros(pct(raw, 2))} of price per year`
       : unit === 'yr' ? `${money0(raw)}/yr`
         : `${money0(raw)}/mo`;
   const otherIncNote = OTHER_INC.filter(k => (s.otherInc[k] || 0) > 0)

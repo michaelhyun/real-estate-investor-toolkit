@@ -143,6 +143,12 @@ export default function PortfolioPage() {
     const downAmt = d.price * (d.downPct || 0) / 100;
     const loan = Math.max(0, d.price - downAmt - (d.sellerOn ? d.sellerAmt || 0 : 0) - (d.subtoOn ? d.subtoBal || 0 : 0));
     const closing = d.closingUnit === '%' ? d.price * (d.closing || 0) / 100 : (d.closing || 0);
+    /* tax and insurance are yearly on a deal, in dollars or as a % of the price; older deals may hold a monthly figure */
+    const yearly = (k: 'tax' | 'ins') => {
+      const v = d.expenses?.[k] || 0, u = d.units?.[k];
+      if (u === '%p') return { v: Math.round(d.price * v / 100), unit: 'yr' as const };
+      return { v, unit: u === 'mo' ? 'mo' as const : 'yr' as const };
+    };
     openModal(null, {
       ...EMPTY,
       name: d.name || d.prop?.address || 'Imported deal',
@@ -150,8 +156,8 @@ export default function PortfolioPage() {
       down: downAmt, other: (d.rehab || 0) + closing,
       loan, rate: d.rate || 0, pay: monthlyPI(loan, d.rate || 0, d.term || 30),
       income: { v: d.rent || 0, unit: 'mo' },
-      taxes: { v: d.expenses?.tax || 0, unit: d.units?.tax === 'yr' ? 'yr' : 'mo' },
-      ins: { v: d.expenses?.ins || 0, unit: d.units?.ins === 'yr' ? 'yr' : 'mo' },
+      taxes: yearly('tax'),
+      ins: yearly('ins'),
     });
     toast('Deal loaded. Add the remaining operating expenses, then save');
   };

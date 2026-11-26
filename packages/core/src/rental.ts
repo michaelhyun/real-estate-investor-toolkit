@@ -8,14 +8,16 @@ import { monthlyPI, loanBalance } from './mortgage';
 export interface ExpenseDef {
   id: string;
   label: string;
-  mode: 'time' | 'rent';   /* time: $/mo vs $/yr · rent: $/mo vs % of rent */
-  unit: 'mo' | 'yr' | '$' | '%';
+  /* time: $/mo vs $/yr · rent: $/mo vs % of rent ·
+     price: always per year, as $/yr or as a % of the purchase price ('%p') */
+  mode: 'time' | 'rent' | 'price';
+  unit: 'mo' | 'yr' | '$' | '%' | '%p';
   val: number;
 }
 
 export const EXPENSES: ExpenseDef[] = [
-  { id: 'tax',       label: 'Property tax',          mode: 'time', unit: 'mo', val: 250 },
-  { id: 'ins',       label: 'Insurance',             mode: 'time', unit: 'mo', val: 120 },
+  { id: 'tax',       label: 'Property tax',          mode: 'price', unit: 'yr', val: 3000 },
+  { id: 'ins',       label: 'Insurance',             mode: 'price', unit: 'yr', val: 1440 },
   { id: 'hoa',       label: 'HOA fees',              mode: 'time', unit: 'mo', val: 0 },
   { id: 'mgmt',      label: 'Property management',   mode: 'rent', unit: '%',  val: 10 },
   { id: 'maint',     label: 'Maintenance & repairs', mode: 'rent', unit: '%',  val: 8 },
@@ -30,7 +32,7 @@ export const UTIL_LABELS: Record<string, string> = {
   electric: 'Electricity', water: 'Water', sewer: 'Sewer',
   trash: 'Trash', gas: 'Gas', internet: 'Internet',
 };
-export const UNIT_LABELS: Record<string, string> = { mo: '$/mo', yr: '$/yr', $: '$/mo', '%': '% rent' };
+export const UNIT_LABELS: Record<string, string> = { mo: '$/mo', yr: '$/yr', $: '$/mo', '%': '% rent', '%p': '% of price/yr' };
 export const UTILS = ['electric', 'water', 'sewer', 'trash', 'gas', 'internet'] as const;
 export const OTHER_INC = ['laundry', 'parking', 'storage', 'pet', 'other'] as const;
 export const OTHER_INC_LABELS: Record<string, string> = {
@@ -146,8 +148,9 @@ export function defaultDealState(): DealState {
 }
 
 /* monthly cost of one expense line */
-export function expMonthly(unit: string, v: number, rent: number): number {
+export function expMonthly(unit: string, v: number, rent: number, price = 0): number {
   if (unit === '%') return rent * v / 100;
+  if (unit === '%p') return price * v / 100 / 12;   /* a yearly % of the purchase price */
   if (unit === 'yr') return v / 12;
   return v; /* 'mo' or '$' */
 }
@@ -227,7 +230,7 @@ export function compute(s: DealState): DealResult {
 
   const expLines: ExpLine[] = EXPENSES.map(e => ({
     ...e, unit: (s.units[e.id] || e.unit) as ExpenseDef['unit'], raw: s.expenses[e.id] || 0,
-    monthly: expMonthly(s.units[e.id] || e.unit, s.expenses[e.id] || 0, s.rent),
+    monthly: expMonthly(s.units[e.id] || e.unit, s.expenses[e.id] || 0, s.rent, s.price),
   }));
   const opEx = expLines.reduce((t, e) => t + e.monthly, 0) + utilTotal;
   const noi = effIncome - opEx;

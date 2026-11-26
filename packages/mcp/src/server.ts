@@ -74,7 +74,10 @@ server.registerTool('analyze_rental', {
   if (a.interest_only_years) { s.ioOn = true; s.ioYears = a.interest_only_years; }
   if (a.vacancy_pct != null) s.vacancy = a.vacancy_pct;
   const exp = (id: string, v: number | undefined) => { if (v != null) s.expenses[id] = v; };
-  exp('tax', a.property_tax_monthly); exp('ins', a.insurance_monthly); exp('hoa', a.hoa_monthly);
+  exp('tax', a.property_tax_monthly); exp('ins', a.insurance_monthly);
+  /* these two inputs are monthly figures; the sheet's own default for them is yearly */
+  if (a.property_tax_monthly != null) s.units.tax = 'mo';
+  if (a.insurance_monthly != null) s.units.ins = 'mo'; exp('hoa', a.hoa_monthly);
   exp('mgmt', a.management_pct); exp('maint', a.maintenance_pct); exp('capex', a.capex_pct);
   exp('misc', a.other_expenses_monthly);
   if (a.other_income_monthly != null) s.otherInc.other = a.other_income_monthly;

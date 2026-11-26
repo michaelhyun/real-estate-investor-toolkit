@@ -54,8 +54,15 @@ function normalizeDeal(d: any): DealState {
     subtoBal: d.subtoBal || 0,
     subtoRate: d.subtoRate ?? 4,
     subtoTerm: d.subtoTerm ?? 26,
-    expenses: { ...base.expenses, ...(d.expenses || {}) },
+    expenses: {
+      ...base.expenses, ...(d.expenses || {}),
+      ...Object.fromEntries(EXPENSES.filter(e => e.mode === 'price' && d.expenses?.[e.id] != null && (d.units?.[e.id] || 'mo') === 'mo')
+        .map(e => [e.id, Math.round(d.expenses[e.id] * 12)])),
+    },
     units: Object.fromEntries(EXPENSES.map(e => {
+      /* property tax and insurance are always yearly now; a deal saved with a
+         monthly figure has it multiplied out below */
+      if (e.mode === 'price') return [e.id, d.units?.[e.id] === '%p' ? '%p' : 'yr'];
       const fallback = e.mode === 'time' ? 'mo' : '$';
       return [e.id, d.units?.[e.id] || fallback];
     })),
@@ -353,10 +360,14 @@ export function RentalAnalyzer({ modeSwitch }: { modeSwitch?: React.ReactNode })
                   const line = r.expLines.find(x => x.id === e.id)!;
                   const units = e.mode === 'time'
                     ? [{ u: 'mo', label: 'mo' }, { u: 'yr', label: 'yr' }]
-                    : [{ u: '$', label: '$' }, { u: '%', label: '%' }];
+                    : e.mode === 'price'
+                      ? [{ u: 'yr', label: '$' }, { u: '%p', label: '%' }]
+                      : [{ u: '$', label: '$' }, { u: '%', label: '%' }];
                   return (
                     <Field key={e.id} label={e.label}
-                      hint={((unit === '%' || unit === 'yr') && line.monthly) ? `= ${money0(line.monthly)}/mo` : undefined}>
+                      hint={e.mode === 'price'
+                        ? (unit === '%p' ? `of price per year = ${money0(line.monthly * 12)}/yr` : 'per year')
+                        : ((unit === '%' || unit === 'yr') && line.monthly) ? `= ${money0(line.monthly)}/mo` : undefined}>
                       <div className="flex items-center gap-1.5">
                         <Segmented options={units} value={unit}
                           onChange={u => {
@@ -364,6 +375,9 @@ export function RentalAnalyzer({ modeSwitch }: { modeSwitch?: React.ReactNode })
                             let v = s.expenses[e.id];
                             if (unit === 'mo' && u === 'yr') v = Math.round(v * 12);
                             if (unit === 'yr' && u === 'mo') v = Math.round(v / 12);
+                            /* yearly dollars to and from a yearly % of the purchase price */
+                            if (unit === 'yr' && u === '%p') v = s.price > 0 ? +(v / s.price * 100).toFixed(2) : 0;
+                            if (unit === '%p' && u === 'yr') v = Math.round(s.price * v / 100);
                             setS(prev => ({
                               ...prev,
                               expenses: { ...prev.expenses, [e.id]: v },
