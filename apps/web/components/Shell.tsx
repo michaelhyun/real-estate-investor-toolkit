@@ -104,7 +104,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </div>
           ))}
         </nav>
-        <div className="border-t border-white/10 p-3"><Account /></div>
+        <div className="flex flex-col gap-1 border-t border-white/10 p-3">
+          <Link href="/settings" className={item(pathname.startsWith('/settings'))} aria-current={pathname.startsWith('/settings') ? 'page' : undefined}>
+            <Icon name="settings" size={20} className={pathname.startsWith('/settings') ? '' : 'text-white/60'} />Settings
+          </Link>
+          <Account />
+        </div>
       </aside>
 
       <div className="min-w-0">
@@ -116,7 +121,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <button type="button" aria-expanded={navOpen} aria-controls="tool-menu"
                 className="inline-flex h-9 items-center gap-1.5 rounded-full bg-white/10 pl-3.5 pr-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                 onClick={ev => { ev.stopPropagation(); setNavOpen(o => !o); }}>
-                {current ? current.short : 'Tools'}
+                {current ? current.short : pathname.startsWith('/settings') ? 'Settings' : 'Tools'}
                 <Icon name="expand_more" size={18} className={`transition-transform ${navOpen ? 'rotate-180' : ''}`} />
               </button>
               {navOpen && (
@@ -134,6 +139,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
                       </Link>
                     );
                   })}
+                  <Link href="/settings" aria-current={pathname.startsWith('/settings') ? 'page' : undefined}
+                    className={`mt-1 flex items-center gap-3 rounded-md border-t border-line px-2.5 py-2.5 text-[0.9375rem] font-bold no-underline hover:no-underline ${pathname.startsWith('/settings') ? 'bg-primary-soft text-primary-deep' : 'text-ink-strong hover:bg-muted'}`}>
+                    <Icon name="settings" size={20} className="text-muted-foreground" />Settings
+                  </Link>
                 </nav>
               )}
             </div>

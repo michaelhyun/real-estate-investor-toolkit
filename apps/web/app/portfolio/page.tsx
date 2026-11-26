@@ -8,7 +8,7 @@
    carries a bar so the ranking reads at a glance. Adding or editing a
    property happens in a popup with the same field rows as the calculators. */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   metrics, migrate, monthlyPI, money, money0,
   type PropertyState, type UnitValue, type DealState,
@@ -114,6 +114,29 @@ export default function PortfolioPage() {
     setProps(prev => prev.filter(x => x !== p));
   }
 
+  /* The portfolio lives in this browser only, so a file is how it moves to
+     another browser or gets backed up. */
+  const fileRef = useRef<HTMLInputElement>(null);
+  function exportFile() {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(props, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'portfolio.json'; a.click();
+    URL.revokeObjectURL(url);
+  }
+  async function importFile(file: File | undefined) {
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!Array.isArray(data) || !data.length) throw new Error('empty');
+      const next = data.map(migrate).filter(p => p.name);
+      if (!next.length) throw new Error('empty');
+      if (props.length && !confirm(`Replace your ${props.length} propert${props.length === 1 ? 'y' : 'ies'} with the ${next.length} in this file?`)) return;
+      setProps(next);
+      toast(`${next.length} propert${next.length === 1 ? 'y' : 'ies'} imported`);
+    } catch { toast('That file is not a portfolio export'); }
+    finally { if (fileRef.current) fileRef.current.value = ''; }
+  }
+
   const importDeal = (idx: string) => {
     const d = deals[+idx];
     if (!d) return;
@@ -164,6 +187,10 @@ export default function PortfolioPage() {
               {deals.map((d, i) => <option key={i} value={i}>{d.name} · {money0(d.price)}</option>)}
             </NativeSelect>
           )}
+          <input ref={fileRef} type="file" accept="application/json,.json" className="sr-only" aria-label="Import a portfolio file"
+            onChange={ev => importFile(ev.target.files?.[0])} />
+          <Button variant="ghost" onClick={() => fileRef.current?.click()} title="Load a portfolio file exported from another browser"><Icon name="upload" size={18} />Import</Button>
+          {props.length > 0 && <Button variant="ghost" onClick={exportFile} title="Save your portfolio as a file, to back it up or move it to another browser"><Icon name="download" size={18} />Export</Button>}
           <Button onClick={() => openModal(null)}><Icon name="add" size={18} />Add property</Button>
         </div>
       </div>

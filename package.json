@@ -7,7 +7,9 @@
   ],
   "scripts": {
     "dev": "npm run dev -w apps/web",
-    "build": "npm run build -w apps/web",
-    "test": "npm run test -w packages/core"
+    "build:mcp": "npm run build -w packages/mcp",
+    "build": "npm run build -w packages/mcp && npm run build -w apps/web",
+    "test": "npm run test -w packages/core",
+    "test:mcp": "npm run build -w packages/mcp && npm run test -w packages/mcp"
   }
 }

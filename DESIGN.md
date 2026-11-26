@@ -50,7 +50,9 @@ One family, Source Sans 3. Page titles 28px/800 with -0.015em tracking; section 
 - Income Tax Calculator: on shadcn components, one two-column page. Federal, California and rates are panels on the page. Professional status, pricing a sale, brackets, and thresholds open as dialogs from a row of buttons under the headline figures; reference tables and what-ifs go in dialogs, not at the bottom of the page.
 - **Row notes:** guidance for a row lives behind an info icon (`InfoTip` in `components/calc.tsx`, via the `info` prop on `Field` and `Line`), opened on hover, focus or tap. Panels can fold (`open`/`onOpenChange` on `Panel`) and keep their headline figure in the tag. Keep a note to one or two short sentences; pass `more` (a URL) to add a Learn more link to an official source.
 - Portfolio: on shadcn components. The table is also the leaderboard (ranked, top three numbered, a bar in the ROE column); add and edit happen in a dialog built from `Field` rows.
-- Still on the legacy layer: Login only. `components/sheet.tsx` has no importers left, and the old controls in `components/ui.tsx` (`NumInput`, `UnitToggle`, `Switch`, `Card`, `Tile`) are no longer used by any calculator.
+- Login: on shadcn components (Google, or email and password with a verification step).
+- Settings (`/settings`): how to connect an AI agent to the MCP server in `packages/mcp`. The server bundle is built into `apps/web/public/mcp/` by `npm run build` and is not committed.
+- No page is on the legacy layer any more. `app/legacy.css`, `components/sheet.tsx` and the old controls in `components/ui.tsx` are left over and can be deleted in a cleanup.
 
 ## Do's and don'ts
 - Do use shadows, not borders, to separate cards from the page.

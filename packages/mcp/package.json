@@ -1,0 +1,21 @@
+{
+  "name": "@reit/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for the Investor Toolkit calculators",
+  "bin": { "investor-toolkit-mcp": "./dist/investor-toolkit-mcp.mjs" },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test.mjs"
+  },
+  "dependencies": {
+    "@reit/core": "*"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.0",
+    "zod": "^3.25.0"
+  }
+}

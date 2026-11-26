@@ -6,3 +6,6 @@ dist/
 *.tsbuildinfo
 .DS_Store
 .env*.local
+
+# built by packages/mcp/build.mjs
+apps/web/public/mcp/
